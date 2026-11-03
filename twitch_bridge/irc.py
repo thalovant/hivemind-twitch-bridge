@@ -15,6 +15,12 @@ from typing import Dict, List, Optional
 MAX_MESSAGE_LENGTH = 500
 #: A Twitch login (user or channel name): lowercase letters, digits, underscore.
 LOGIN_PATTERN = re.compile(r"[a-z0-9_]{1,25}")
+#: Twitch runs a chat message whose first character is one of these as a
+#: command (``/ban``, ``.timeout``, ``/me``...), whoever wrote the text.
+COMMAND_PREFIXES = ("/", ".")
+#: Put before such a message so that it is text: U+200B ZERO WIDTH SPACE is not
+#: whitespace, so it is not trimmed away, and it shows as nothing.
+COMMAND_GUARD = "\u200b"
 #: An IRCv3 message-tag key: optional client prefix "+", optional vendor, name.
 _TAG_KEY = re.compile(r"\+?(?:[A-Za-z0-9.-]+/)?[A-Za-z0-9-]+")
 
@@ -162,17 +168,27 @@ def clean_text(text: str) -> str:
     return " ".join(text.split())
 
 
-def split_message(text: str, limit: int = MAX_MESSAGE_LENGTH, prefix: str = "") -> List[str]:
+def defuse_command(text: str) -> str:
+    """``text`` as Twitch will show it, never run it: a leading ``/`` or ``.`` is guarded."""
+    if text.lstrip().startswith(COMMAND_PREFIXES):
+        return COMMAND_GUARD + text
+    return text
+
+
+def split_message(text: str, limit: int = MAX_MESSAGE_LENGTH, prefix: str = "",
+                  repeat_prefix: bool = False) -> List[str]:
     """Split ``text`` into chat messages of at most ``limit`` characters each.
 
     Breaks between words where it can and inside a word only when one word is
     longer than a whole message. ``prefix`` (``"@alice "``) starts the first
-    message and counts toward its length.
+    message, or every message with ``repeat_prefix``, and counts toward its
+    length.
     """
     text = clean_text(text)
     if not text:
         return []
     chunks: List[str] = []
+    restart = prefix if repeat_prefix else ""
     current = prefix
     fresh = True  # ``current`` holds no word yet, only the prefix (if any)
     for word in text.split(" "):
@@ -183,15 +199,15 @@ def split_message(text: str, limit: int = MAX_MESSAGE_LENGTH, prefix: str = "") 
             continue
         if not fresh:
             chunks.append(current)
-            current, fresh = "", True
-            if chat_length(word) <= limit:
-                current, fresh = word, False
+            current, fresh = restart, True
+            if chat_length(current + word) <= limit:
+                current, fresh = current + word, False
                 continue
         # a word longer than the room left in an empty message: cut it
         for char in word:
             if chat_length(current + char) > limit:
                 chunks.append(current)
-                current = ""
+                current = restart
             current += char
         fresh = False
     if not fresh:

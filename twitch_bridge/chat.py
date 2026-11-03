@@ -33,9 +33,12 @@ from websockets.exceptions import ConnectionClosed, WebSocketException
 
 from twitch_bridge.errors import TokenRejected
 from twitch_bridge.irc import (
+    COMMAND_GUARD,
     LOGIN_PATTERN,
+    MAX_MESSAGE_LENGTH,
     IrcMessage,
     chat_length,
+    defuse_command,
     format_line,
     parse_line,
     split_message,
@@ -522,8 +525,10 @@ class TwitchChat:
 
         Call on the event loop. ``reply_to`` is the id of the message being
         answered (sent as ``reply-parent-msg-id``, so Twitch shows a reply);
-        ``mention`` is the login to address, ``@login`` starting the first
-        message.
+        ``mention`` is the login to address, ``@login`` starting every
+        message. No message can start with ``/`` or ``.``, which Twitch would
+        run as a command: with no one to address, such a message starts with
+        an invisible ``COMMAND_GUARD``.
         """
         channel = (channel or "").lower().lstrip("#")
         if channel not in self._channel_set:
@@ -534,9 +539,14 @@ class TwitchChat:
         reply_to = str(reply_to) if reply_to not in (None, "") else None
         if not (isinstance(mention, str) and LOGIN_PATTERN.fullmatch(mention)):
             mention = None
-        prefix = f"@{mention} " if mention else ""
         text = text if isinstance(text, str) else str(text)
-        chunks = split_message(text, prefix=prefix)
+        if mention:
+            # every part addresses the person, so no part can start with "/"
+            # or "." and run as a Twitch command
+            chunks = split_message(text, prefix=f"@{mention} ", repeat_prefix=True)
+        else:
+            chunks = [defuse_command(chunk) for chunk in
+                      split_message(text, limit=MAX_MESSAGE_LENGTH - len(COMMAND_GUARD))]
         queue = self._pending.setdefault(channel, deque())
         now = time.monotonic()
         queued = 0

@@ -329,7 +329,8 @@ def test_a_long_reply_is_split_under_500_characters_in_order():
             texts = [parse_line(line).trailing for _, line in server.privmsgs]
             assert all(chat_length(text) <= MAX_MESSAGE_LENGTH for text in texts)
             assert texts[0].startswith("@alice w000")
-            assert " ".join(texts)[len("@alice "):].split(" ") == words
+            assert all(text.startswith("@alice ") for text in texts)
+            assert " ".join(text[len("@alice "):] for text in texts).split(" ") == words
             assert all(parse_line(line).tags == {"reply-parent-msg-id": "m-1"}
                        for _, line in server.privmsgs)
             await stop(chat, task)
@@ -517,5 +518,49 @@ def test_the_sender_survives_an_item_it_cannot_send():
             chat.say("alpha", "still sending")
             await until(lambda: server.privmsgs, what="the next message")
             assert [line for _, line in server.privmsgs] == ["PRIVMSG #alpha :still sending"]
+            await stop(chat, task)
+    run(scenario)
+
+
+# ---------------------------------------------------------------------------
+# Twitch runs a chat message that starts with "/" or "." as a command
+# ---------------------------------------------------------------------------
+COMMANDS = ("/ban alice", ".timeout alice 600", "/me dances", ". ban", "/announce hi")
+
+
+@pytest.mark.parametrize("answer", COMMANDS)
+def test_an_answer_with_nobody_to_address_is_never_a_command(answer):
+    async def scenario():
+        async with FakeTwitch() as server:
+            chat = make_chat(server)
+            task = await started(chat)
+            await until(chat.ready, what="ready")
+            assert chat.say("alpha", answer) == 1
+            await until(lambda: server.privmsgs, what="the reply")
+            text = parse_line(server.privmsgs[0][1]).trailing
+            assert not text.startswith(("/", "."))
+            assert text.endswith(answer)
+            await stop(chat, task)
+    run(scenario)
+
+
+@pytest.mark.parametrize("mention", ["alice", None])
+def test_no_part_of_a_long_answer_starts_like_a_command(mention):
+    """A crafted answer can put ``/ban`` or ``.timeout`` exactly where a part begins."""
+    async def scenario():
+        async with FakeTwitch() as server:
+            chat = make_chat(server, limiter=SendLimiter(limit=20, window=1.0, channel_gap=0.0))
+            task = await started(chat)
+            await until(chat.ready, what="ready")
+            # every word is a command, so whatever a part starts with, it is one
+            answer = " ".join(["/ban", ".timeout"] * 120)
+            count = chat.say("alpha", answer, mention=mention)
+            assert count >= 2
+            await until(lambda: len(server.privmsgs) == count, what="every part")
+            texts = [parse_line(line).trailing for _, line in server.privmsgs]
+            assert all(chat_length(text) <= MAX_MESSAGE_LENGTH for text in texts)
+            assert not any(text.startswith(("/", ".")) for text in texts)
+            if mention:
+                assert all(text.startswith("@alice ") for text in texts)
             await stop(chat, task)
     run(scenario)

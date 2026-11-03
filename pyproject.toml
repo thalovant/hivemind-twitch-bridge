@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "HiveMind-twitch-bridge"
-description = "Relay a Twitch channel's chat to and from a HiveMind hub"
+description = "Bridge a Twitch bot's chat to a HiveMind hub"
 readme = "readme.md"
 authors = [{ name = "jarbasAI", email = "jarbasai@mailfence.com" }]
 license = { text = "Apache-2.0" }
@@ -14,7 +14,7 @@ dynamic = ["version", "dependencies"]
 [project.optional-dependencies]
 test = ["pytest"]
 # e2e drives the bridge against a REAL hivemind-core hub booted in-process by
-# hivescope (loopback WebSocket). The prerelease floors below let a plain
+# hivescope (loopback WebSocket), with Twitch chat served by tests/fake_twitch.py. The prerelease floors below let a plain
 # `pip install -e .[e2e]` resolve the 2.x hivemind-core stack with no --pre
 # (PEP 440: a prerelease floor opts that package into prereleases).
 # hivescope>=0.8.0a1 carries the loopback + get_client_by_id fixes (hivescope#26).

@@ -532,8 +532,10 @@ class TwitchChat:
         )
         try:
             self._on_message(chat_message)
-        except Exception:  # one bad message must not end the session
-            LOG.exception("the chat message handler failed")
+        except Exception as error:  # one bad message must not end the session
+            # the type only: a traceback carries the exception's text, which
+            # can quote the message
+            LOG.error(f"the chat message handler failed ({type(error).__name__})")
 
     async def _join_loop(self) -> None:
         try:

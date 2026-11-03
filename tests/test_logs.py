@@ -51,3 +51,46 @@ def test_neither_text_nor_tokens_are_logged(monkeypatch, caplog):
     assert SECRET_ANSWER not in everything
     for secret in SECRETS:
         assert secret not in everything, secret
+
+
+def test_a_failure_while_handling_text_never_puts_the_text_in_a_log(caplog):
+    """A traceback carries the exception's text, and asyncio logs a failed
+    callback with its arguments: the question or the answer, both times."""
+    import asyncio
+    import threading
+
+    from twitch_bridge.chat import TwitchChat
+    from twitch_bridge.irc import parse_line
+
+    caplog.set_level(logging.DEBUG)
+
+    def handler(message):
+        raise ValueError(f"cannot handle {message.text}")
+
+    chat = TwitchChat("hivebot", lambda: "t", ["alpha"], handler)
+    chat._joined.add("alpha")
+    chat._deliver(parse_line(f":alice!alice@alice.tmi.twitch.tv PRIVMSG #alpha :{SECRET_QUESTION}"))
+
+    hub = FakeHub()
+    hub.connect()
+    bridge = bridge_module.HiveMindTwitchBridge("hivebot", ["alpha"], oauth_token="t", client=hub)
+    loop = asyncio.new_event_loop()
+    runner = threading.Thread(target=loop.run_forever, daemon=True)
+    runner.start()
+    try:
+        bridge._loop = loop
+
+        def say(channel, text, *args):
+            raise RuntimeError(f"cannot send {text}")
+
+        bridge.chat.say = say
+        bridge.speak(SECRET_ANSWER, "alpha", reply_to="m-1", mention="alice")
+        asyncio.run_coroutine_threadsafe(asyncio.sleep(0.05), loop).result(5)
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
+        runner.join(5)
+        loop.close()
+
+    assert caplog.records, "nothing was logged; the test would prove nothing"
+    assert SECRET_QUESTION not in caplog.text
+    assert SECRET_ANSWER not in caplog.text

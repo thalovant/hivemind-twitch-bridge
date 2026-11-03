@@ -444,9 +444,18 @@ class HiveMindTwitchBridge:
         # the length, never the text
         LOG.debug(f"reply for #{channel}: {chat_length(text)} characters")
         try:
-            loop.call_soon_threadsafe(self.chat.say, channel, text, reply_to, mention)
+            loop.call_soon_threadsafe(self._say, channel, text, reply_to, mention)
         except RuntimeError:
             LOG.warning("Twitch chat stopped; dropping a reply")
+
+    def _say(self, channel: str, text: str, reply_to: Optional[str],
+             mention: Optional[str]) -> None:
+        """``chat.say`` on the loop. asyncio logs a callback that raises together
+        with its arguments, the answer included: log the type only."""
+        try:
+            self.chat.say(channel, text, reply_to, mention)
+        except Exception as error:
+            LOG.error(f"could not queue a reply for #{channel} ({type(error).__name__})")
 
 
 def _channel_login(channel: str) -> str:

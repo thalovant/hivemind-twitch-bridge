@@ -106,7 +106,7 @@ Checked and fine: the hub outage path (`hub_live` before forwarding, `forward_to
 
 - **Where:** `HiveMindTwitchBridge._run` (`twitch_bridge/__init__.py`, `except ClientRejected`).
 - **Finding:** exit status 4 and nothing in `/dev/termination-log`, by design (the bot's consent is not the problem; FAQ.md). The operator can only tell it from the exit status, and the other bridges' contract names `token_rejected` alone. In the managed deployment the owner supplies the client id and secret themselves (the Twitch entry of the platform's connector catalog, in review in thalovant-api#467), and the operator reports `TokenRejected` only from the termination message (hivemind-k8s-operator#121). A refused client id or secret therefore shows as a bridge that stopped answering, not as credentials to replace; SUGGESTIONS.md has the fix.
-- **Fixed:** `except ClientRejected` writes `token_rejected` and returns `EXIT_TOKEN_REJECTED` (3), keeping its own log line; `EXIT_CLIENT_REJECTED` (4) is gone. Test: `tests/test_bridge.py::test_a_refused_client_secret_writes_token_rejected_and_exits_3` (fails on the previous code: exit 4, no termination file). The operator then reports `TokenRejected`, and the API asks the owner to replace the credentials.
+- **Fixed:** `except ClientRejected` writes `token_rejected` and returns `EXIT_TOKEN_REJECTED` (3), keeping its own log line; `EXIT_CLIENT_REJECTED` (4) is gone. Test: `tests/test_bridge.py::test_a_refused_client_id_or_secret_writes_token_rejected_and_exits_3` (fails on the previous code: exit 4, no termination file). The operator then reports `TokenRejected`, and the API asks the owner to replace the credentials.
 
 ## 13. The command guard is not checked against live Twitch
 

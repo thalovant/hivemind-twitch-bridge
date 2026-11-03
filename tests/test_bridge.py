@@ -195,16 +195,26 @@ def test_an_invalid_refresh_grant_writes_token_rejected_before_chat_is_touched(t
         assert chat.fake.connections == 0
 
 
-def test_a_refused_client_secret_writes_token_rejected_and_exits_3(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "refused",
+    [
+        {"client_secret": "other"},  # Twitch answers 403 "invalid client secret"
+        {"client_id": "other"},  # Twitch answers 400 "invalid client"
+    ],
+)
+def test_a_refused_client_id_or_secret_writes_token_rejected_and_exits_3(
+    tmp_path, monkeypatch, refused
+):
     # The owner supplies the client id and secret like the token: a refusal
     # is credentials to replace, so it reads token_rejected like a refused
     # token, with a log line of its own.
     errors = []
     monkeypatch.setattr(twitch_bridge.LOG, "error", lambda message, *args: errors.append(message))
     termination = tmp_path / "termination-log"
-    with ThreadedFakeTwitch() as chat, FakeTwitchId(client_secret="other") as ids:
+    with ThreadedFakeTwitch() as chat, FakeTwitchId(**refused) as ids:
         bridge = make_bridge(chat, ids, termination=termination)
-        assert Running(bridge).__enter__().wait() == EXIT_TOKEN_REJECTED
+        # the literal status: the contract the operator and the docs name
+        assert Running(bridge).__enter__().wait() == 3
         assert termination.read_text() == "token_rejected"
         assert chat.fake.connections == 0
     assert any("client id or secret" in message for message in errors), errors

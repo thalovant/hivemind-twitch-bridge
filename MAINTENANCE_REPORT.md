@@ -1,7 +1,20 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: CodeRabbit on PR #2: five comments applied (reconnect row, no-asker readme line, exact guard test, forwarded-only chain count, slow-mode cap).
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: CodeRabbit review-body follow-ups after PRs #1 and #2: prefix guard, stronger tests, live delivery observer.
 
 # Maintenance report: hivemind-twitch-bridge
 
+
+
+## 2026-11-03: CodeRabbit review-body follow-ups (after pull requests #1 and #2)
+
+These comments sat in review bodies ("Follow-up Comments"), not threads, and were seen after the merges. Each was checked against `main` at `d184984b` first; all five still applied.
+
+- **#2 1f1aaac5 `twitch_bridge/irc.py` L180-194:** `split_message` raises `ValueError` for a prefix longer than `limit - 2` UTF-16 units, so a part always holds the prefix and one emoji. Tests: `tests/test_irc.py::test_a_prefix_must_leave_room_for_a_two_unit_character` (both prefix modes), `::test_the_longest_allowed_prefix_still_fits_every_part`.
+- **#2 1f1aaac5 `tests/test_logs.py` L94-96:** the test asserts the two type-only lines. Doing so showed the bridge's logger does not propagate to `caplog`; the test now reads the printed output (`capfd`) as well, which also makes the question-leak check real (restoring `LOG.exception` in `_deliver` fails it).
+- **#2 1f1aaac5 `tests/test_irc.py` L118-121:** the repeated-prefix test checks the rebuilt text.
+- **#1 0718b63d `tests/test_chat.py` L395-397:** the window test records the limiter's own send times and checks them against `limiter.window` exactly (not 0.95 s of server receipt times).
+- **#1 0718b63d `tests/e2e/test_twitch_live.py` L84-87:** with `TWITCH_LIVE_SEND=1`, an anonymous read-only login (`justinfan<digits>`, as the credential-free live checks already use) joins the channel and must receive the bot's message within 20 s. No new credentials; stays opt-in and out of required CI.
+- **Verification:** `python -m pytest tests -q --ignore=tests/e2e` (ovos-config file watcher off): 170 passed; `tests/e2e`: 2 passed through a real hub, 3 skipped (live, opt-in); ruff clean. Not run: the live send branch (needs the bot's token).
+- **Transparency report:** AI model Claude Opus 5.5 (`claude-opus-5-5`) in Claude Code; applied five automated review-body comments, the code one with tests; no human review yet.
 
 ## 2026-11-03: CodeRabbit on pull request #2
 

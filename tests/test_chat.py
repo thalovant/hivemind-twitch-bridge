@@ -386,16 +386,26 @@ def test_the_wire_never_carries_more_than_the_limit_in_any_window():
     async def scenario():
         async with FakeTwitch() as server:
             limiter = SendLimiter(limit=3, window=1.0, channel_gap=0.2)
+            # the times the limiter itself recorded each send at: no network
+            # jitter, so they must hold the configured window exactly
+            sent_at = []
+            record = limiter.record
+
+            def record_send_time(channel, now):
+                sent_at.append(now)
+                record(channel, now)
+
+            limiter.record = record_send_time
             chat = make_chat(server, limiter=limiter)
             task = await started(chat)
             await until(chat.ready, what="ready")
             for index in range(5):
                 chat.say("alpha", f"a{index}")
                 chat.say("beta", f"b{index}")
-            await until(lambda: len(server.privmsgs) == 10, timeout=10, what="all ten")
-            times = [at for at, _ in server.privmsgs]
-            for start in times:
-                in_window = [at for at in times if start <= at < start + 0.95]
+            await until(lambda: len(sent_at) == 10 and len(server.privmsgs) == 10,
+                        timeout=10, what="all ten")
+            for start in sent_at:
+                in_window = [at for at in sent_at if 0 <= at - start < limiter.window]
                 assert len(in_window) <= 3, "more than 3 messages inside one window"
             for channel in ("#alpha", "#beta"):
                 sent = [at for at, line in server.privmsgs if f"PRIVMSG {channel} " in line]

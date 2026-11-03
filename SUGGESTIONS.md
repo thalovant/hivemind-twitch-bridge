@@ -1,4 +1,4 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Independent review: ignore list for known bots, a termination reason for a refused client secret.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: A refused client secret matters more now that owners supply it; the bot ignore list is a catalog setting, not an operator one.
 
 # Suggestions: hivemind-twitch-bridge
 
@@ -53,12 +53,12 @@ Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Independent review: ignore lis
 ## An ignore list for known bots
 
 - **Problem:** AUDIT.md section 14: a bot that answers with plain `@mentions` is not caught by the reply-chain bound, and Twitch has no bot flag.
-- **Proposal:** `TWITCH_IGNORED_USERS` (logins, comma or space separated), set by the operator from a platform list (Nightbot, StreamElements, Streamlabs, Moobot, Fossabot, other bridges' bot accounts) plus the customer's own.
+- **Proposal:** `TWITCH_IGNORED_USERS` (logins, comma or space separated), set by the platform as a connector setting (the operator renders any connector's `env` and keeps no network table, hivemind-k8s-operator#121) from a platform list (Nightbot, StreamElements, Streamlabs, Moobot, Fossabot, other bridges' bot accounts) plus the customer's own.
 - **Impact:** low to medium; one setting and a check in `handle_chat_message`.
 
 ## A termination reason for a refused client secret
 
 - **Problem:** AUDIT.md section 12: exit status 4 writes nothing to `/dev/termination-log`.
-- **Proposal:** write `client_rejected` once the operator maps it (or reuse `token_rejected` if the platform treats both as "credentials need fixing").
-- **Impact:** low; clearer status in the console.
+- **Proposal:** write `token_rejected` for a refused client id or secret too. In the managed deployment the owner types the client id (a setting) and the client secret and refresh token (credentials) themselves (thalovant-api#467's catalog entry), and the console asks for new credentials ("Twitch refused its credentials. Replace them here.") only on `TokenRejected`; any other stop reads "stopped answering". One reason covers every credential the owner can fix. A separate `client_rejected` would need a mapping in the operator and the API first.
+- **Impact:** medium; the owner is told to fix the credentials instead of seeing a bridge that stopped answering. Two lines and a test in `HiveMindTwitchBridge._run`.
 

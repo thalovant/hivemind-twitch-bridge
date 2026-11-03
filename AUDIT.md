@@ -1,4 +1,4 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: CodeRabbit review-body follow-ups (PRs #1 and #2): prefix room guard, stronger log/limit/split tests, live delivery observer.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Section 12 restated for the managed deployment: the owner supplies the client id and secret, and the operator maps only token_rejected.
 
 # Audit: hivemind-twitch-bridge
 
@@ -105,7 +105,7 @@ Checked and fine: the hub outage path (`hub_live` before forwarding, `forward_to
 ## 12. A refused client id or secret writes no termination message
 
 - **Where:** `HiveMindTwitchBridge._run` (`twitch_bridge/__init__.py`, `except ClientRejected`).
-- **Finding:** exit status 4 and nothing in `/dev/termination-log`, by design (the bot's consent is not the problem; FAQ.md). The operator can only tell it from the exit status, and the other bridges' contract names `token_rejected` alone. If the platform owns the Twitch application, it has to map exit 4 itself.
+- **Finding:** exit status 4 and nothing in `/dev/termination-log`, by design (the bot's consent is not the problem; FAQ.md). The operator can only tell it from the exit status, and the other bridges' contract names `token_rejected` alone. In the managed deployment the owner supplies the client id and secret themselves (the Twitch entry of the platform's connector catalog, in review in thalovant-api#467), and the operator reports `TokenRejected` only from the termination message (hivemind-k8s-operator#121). A refused client id or secret therefore shows as a bridge that stopped answering, not as credentials to replace; SUGGESTIONS.md has the fix.
 
 ## 13. The command guard is not checked against live Twitch
 

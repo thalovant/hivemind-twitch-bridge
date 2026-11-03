@@ -22,7 +22,8 @@ Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Independent adversarial review
 - Fuzz run of `parse_line` and `TwitchChat._handle` with 20 000 random and seeded lines: only the two T4 server lines raised.
 - `python -m pytest tests -q --ignore=tests/e2e`: 160 passed (Python 3.12, local; 133 before).
 - `ruff check --isolated --select F,E9 .`: clean.
-- Not run locally: `tests/e2e` (needs the `e2e` extra; CI runs it), the image smoke steps, and a live Twitch check of the U+200B guard (AUDIT section 13).
+- `python -m pytest tests/e2e -q` (the `e2e` extra; ovos-config's file watcher turned off, as this host has no inotify watches left): 2 passed through a real hivemind-core hub, 3 skipped (opt-in live Twitch).
+- Not run locally: the image smoke steps, and a live Twitch check of the U+200B guard (AUDIT section 13).
 
 **Transparency report**
 

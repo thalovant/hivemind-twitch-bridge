@@ -137,6 +137,8 @@ def format_line(command: str, *params: str, tags: Optional[Dict[str, str]] = Non
                                  "(with an optional vendor/ and +)")
             if not isinstance(value, str):
                 raise ValueError("an IRC tag value must be text")
+            if "\0" in value:
+                raise ValueError("an IRC tag value cannot contain NUL")
         parts.append("@" + ";".join(f"{key}={escape_tag_value(value)}"
                                     for key, value in tags.items()))
     for piece in (command, *params):

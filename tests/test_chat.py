@@ -564,3 +564,38 @@ def test_no_part_of_a_long_answer_starts_like_a_command(mention):
                 assert all(text.startswith("@alice ") for text in texts)
             await stop(chat, task)
     run(scenario)
+
+
+def test_a_line_the_bridge_cannot_act_on_is_skipped_not_fatal():
+    """``"²".isdigit()`` is True and ``float("²")`` raises; a NUL makes the PONG
+    unsendable. Either used to end the chat task, and with it the process."""
+    async def scenario():
+        async with FakeTwitch() as server:
+            received = []
+            chat = make_chat(server, channels=("alpha",), received=received)
+            task = await started(chat)
+            await until(chat.ready, what="ready")
+            await server.push("@room-id=42;slow=² :tmi.twitch.tv ROOMSTATE #alpha",
+                              "PING :tmi\x00.twitch.tv")
+            await server.chat("alpha", "alice", "@hivebot still there?")
+            await until(lambda: received, what="the next message")
+            assert not task.done()
+            assert server.connections == 1
+            await stop(chat, task)
+    run(scenario)
+
+
+@pytest.mark.parametrize("reply_to", ["m\x001", "m 1", "m\r\n1", "x" * 200])
+def test_an_odd_reply_id_from_the_hub_still_sends_the_answer_without_it(reply_to):
+    async def scenario():
+        async with FakeTwitch() as server:
+            chat = make_chat(server)
+            task = await started(chat)
+            await until(chat.ready, what="ready")
+            assert chat.say("alpha", "it is noon", reply_to=reply_to, mention="alice") == 1
+            await until(lambda: server.privmsgs, what="the reply")
+            line = server.privmsgs[0][1]
+            assert line == "PRIVMSG #alpha :@alice it is noon"
+            assert "\x00" not in "".join(server.lines())
+            await stop(chat, task)
+    run(scenario)

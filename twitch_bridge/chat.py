@@ -179,6 +179,37 @@ class SendLimiter:
         self._paused_until[channel] = max(self._paused_until.get(channel, 0.0), now + seconds)
 
 
+#: Longest reply id passed on to Twitch (its ids are 36-character UUIDs).
+MAX_MESSAGE_ID = 64
+
+
+def _seconds(value: Optional[str]) -> Optional[float]:
+    """A tag holding whole seconds (``slow=30``); None when it is not one.
+
+    ``str.isdigit`` alone is not enough: ``"²".isdigit()`` is True, and
+    ``float("²")`` raises.
+    """
+    if not value or not (value.isascii() and value.isdigit()):
+        return None
+    return float(value)
+
+
+def _message_id(value) -> Optional[str]:
+    """A reply id fit for the ``reply-parent-msg-id`` tag, or None.
+
+    The hub hands back what the question's context held, or whatever a skill
+    put there. An id with a space or a control character is no Twitch id;
+    without it the answer is still sent, just not as a threaded reply.
+    """
+    if value is None:
+        return None
+    value = str(value)
+    if (not value or len(value) > MAX_MESSAGE_ID
+            or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value)):
+        return None
+    return value
+
+
 class _ConnectionLost(Exception):
     """The session ended for a reason a reconnect can fix."""
 
@@ -383,7 +414,21 @@ class TwitchChat:
                 # one frame can carry several lines
                 for line in frame.split("\n"):
                     message = parse_line(line)
-                    if message is not None and await self._handle(message):
+                    if message is None:
+                        continue
+                    try:
+                        reconnect = await self._handle(message)
+                    except (TokenRejected, ConnectionClosed, WebSocketException, OSError,
+                            _ConnectionLost):
+                        raise
+                    except Exception as error:
+                        # one line the bridge cannot act on must not end the
+                        # session, let alone the process; the command, never
+                        # the line (a line can carry what someone wrote)
+                        LOG.warning(f"ignored a Twitch {message.command[:16]} line that "
+                                    f"could not be handled ({type(error).__name__})")
+                        continue
+                    if reconnect:
                         self._planned_reconnect = True
                         return
 
@@ -422,9 +467,9 @@ class TwitchChat:
         elif command == "ROOMSTATE":
             channel = message.channel
             self._mark_joined(channel)
-            slow = message.tags.get("slow")
-            if channel and slow is not None and slow.isdigit():
-                self.limiter.set_slow_mode(channel, float(slow))
+            slow = _seconds(message.tags.get("slow"))
+            if channel and slow is not None:
+                self.limiter.set_slow_mode(channel, slow)
         elif command == "PART" and message.nick == self.login:
             channel = message.channel
             if channel in self._joined:
@@ -536,7 +581,7 @@ class TwitchChat:
             return 0
         # the hub echoes these back from the question's context; a skill can
         # hand back other types, which must not reach the wire as they are
-        reply_to = str(reply_to) if reply_to not in (None, "") else None
+        reply_to = _message_id(reply_to)
         if not (isinstance(mention, str) and LOGIN_PATTERN.fullmatch(mention)):
             mention = None
         text = text if isinstance(text, str) else str(text)

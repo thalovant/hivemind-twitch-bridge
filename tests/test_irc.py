@@ -128,3 +128,9 @@ def test_a_repeated_prefix_starts_every_part_and_fits():
 def test_defuse_command_guards_only_a_leading_slash_or_dot(text, guarded):
     from twitch_bridge.irc import COMMAND_GUARD, defuse_command
     assert defuse_command(text) == (COMMAND_GUARD + text if guarded else text)
+
+
+def test_a_tag_value_cannot_carry_a_nul():
+    from twitch_bridge.irc import format_line
+    with pytest.raises(ValueError):
+        format_line("PRIVMSG", "#alpha", "hi", tags={"reply-parent-msg-id": "a\x00b"})

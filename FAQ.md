@@ -1,4 +1,4 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Independent review: commands in replies, bot loops, redirects, reconnect backoff.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: How a refused client secret shows where the operator runs the bridge; the RSA identity beside the Noise key.
 
 # FAQ: hivemind-twitch-bridge
 
@@ -24,7 +24,7 @@ With `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET` and `TWITCH_REFRESH_TOKEN`, `Twi
 
 ## What does `token_rejected` mean?
 
-Twitch refused the bot's credentials and no retry can fix it: `Login authentication failed` from chat (after one extra refresh when a refresh token is set), an invalid refresh grant, a token for another account than `TWITCH_BOT_LOGIN`, or a token without `chat:read` and `chat:edit`. The bridge writes `token_rejected` to `/dev/termination-log` and exits 3. A refused client id or secret exits 4 and writes nothing: the bot's consent is not the problem.
+Twitch refused the bot's credentials and no retry can fix it: `Login authentication failed` from chat (after one extra refresh when a refresh token is set), an invalid refresh grant, a token for another account than `TWITCH_BOT_LOGIN`, or a token without `chat:read` and `chat:edit`. The bridge writes `token_rejected` to `/dev/termination-log` and exits 3. A refused client id or secret exits 4 and writes nothing: the bot's consent is not the problem. Where the operator runs the bridge, it reports `TokenRejected` only from the termination message (hivemind-k8s-operator#121), so exit 4 shows as a bridge that stopped answering; AUDIT.md section 12 and SUGGESTIONS.md have the proposed fix.
 
 ## Why does the bridge need only TCP 443?
 
@@ -44,7 +44,7 @@ The reply is threaded under the question (`reply-parent-msg-id`), and starts wit
 
 ## Where is the Noise key?
 
-`/home/bridge/.config/hivemind/unnamed-node_noise.key`, the hivemind-bus-client default for an unnamed node; the identity (`_identity.json`) sits next to it. It is the only directory the image writes besides `/tmp`.
+`/home/bridge/.config/hivemind/unnamed-node_noise.key`, the hivemind-bus-client default for an unnamed node; the identity (`_identity.json`) sits next to it. It is the only directory the image writes besides `/tmp`. The RSA identity (`unnamed-node.pem`) is there too; where the operator runs the bridge, both keys come read-only from the bridge's credentials Secret (hivemind-k8s-operator#122).
 
 ## How do I test without a Twitch account?
 

@@ -1,8 +1,15 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: CodeRabbit review-body follow-ups after PRs #1 and #2: prefix guard, stronger tests, live delivery observer.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Docs refresh: AUDIT section 12 and two suggestions against the platform's connector catalog and the generic operator.
 
 # Maintenance report: hivemind-twitch-bridge
 
 
+
+## 2026-11-03: docs refresh against the platform's state
+
+- **What:** QUICK_FACTS gains the RSA identity path and the exit statuses; FAQ says how exit 4 shows where the operator runs the bridge, and where the RSA identity lives. AUDIT.md section 12 (a refused client id or secret writes no termination message) restated: in the managed deployment the owner supplies the client id and secret (the Twitch entry in thalovant-api#467's connector catalog, in review), and the operator reports `TokenRejected` only from the termination message (hivemind-k8s-operator#121), so it shows as "stopped answering". SUGGESTIONS.md: the termination-reason item now proposes reusing `token_rejected` (impact raised to medium); the bot ignore list would be a connector setting, since the operator renders any connector's `env`. No code change.
+- **Checked:** the catalog entry's env contract (`TWITCH_BOT_LOGIN`, `TWITCH_CLIENT_ID` plain; `TWITCH_CLIENT_SECRET` and `TWITCH_REFRESH_TOKEN` as `_FILE` secrets; `TWITCH_ALLOWED_CHANNELS` with `#` stripped and lower-cased, at most 50; `TWITCH_REQUIRE_MENTION`, `TWITCH_SESSION_SCOPE`; no DM policy) matches `resolve_options` in `twitch_bridge/__main__.py`. QUICK_FACTS (version `0.1.0`, entry point, 170 tests) still matches.
+- **Verification:** `python -m pytest tests -q --ignore=tests/e2e` (Python 3.13, HOME pointed at an empty directory for ovos-config's file watcher): 170 passed.
+- **Transparency report:** AI model Claude Opus 5.5 (`claude-opus-5-5`) in Claude Code; compared these docs with the code, the operator and the API sources and edited five files; no human review yet.
 
 ## 2026-11-03: CodeRabbit review-body follow-ups (after pull requests #1 and #2)
 

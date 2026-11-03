@@ -1,6 +1,17 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Independent adversarial review of main: six fixes (command guard, bot-loop bound, no redirects for tokens, odd server lines, text-free exception logs, reconnect backoff).
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: CodeRabbit on PR #2: five comments applied (reconnect row, no-asker readme line, exact guard test, forwarded-only chain count, slow-mode cap).
 
 # Maintenance report: hivemind-twitch-bridge
+
+
+## 2026-11-03: CodeRabbit on pull request #2
+
+- `PRRT_kwDOVg5F8c6zHPUS` QUICK_FACTS Reconnect row: the first planned reconnect after a short session stays immediate; later ones in a row back off.
+- `PRRT_kwDOVg5F8c6zHPU3` readme: with no asker, only a part starting with `/` or `.` gets the invisible guard.
+- `PRRT_kwDOVg5F8c6zHPVC` `test_an_answer_with_nobody_to_address_is_never_a_command` asserts the exact text, `"\u200b" + answer`.
+- `PRRT_kwDOVg5F8c6zHPVP` `handle_chat_message` counts a reply to the bot only after `forward_to_hivemind` succeeded (`_record_reply`; `forward_to_hivemind` returns whether `emit` took it). Test: `tests/test_mentions.py::test_a_reply_that_never_reached_the_hub_does_not_count_toward_the_chain` (hub down, `emit` raising).
+- `PRRT_kwDOVg5F8c6zHPVb` `_seconds` caps slow mode at 120 s (`MAX_SLOW_SECONDS`). Test: `tests/test_chat.py::test_slow_mode_is_read_up_to_twitchs_maximum`.
+- **Verification:** the two code tests failed before their change (4 cases); `python -m pytest tests -q --ignore=tests/e2e` (ovos-config's file watcher off: no inotify watches left on this host): 167 passed; ruff clean.
+- **Transparency report:** AI model Claude Opus 5.5 (`claude-opus-5-5`) in Claude Code; applied the automated review's five comments, code ones with tests; no human review yet.
 
 ## 2026-11-03: independent review of main
 

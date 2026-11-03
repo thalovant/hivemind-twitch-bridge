@@ -538,8 +538,7 @@ def test_an_answer_with_nobody_to_address_is_never_a_command(answer):
             assert chat.say("alpha", answer) == 1
             await until(lambda: server.privmsgs, what="the reply")
             text = parse_line(server.privmsgs[0][1]).trailing
-            assert not text.startswith(("/", "."))
-            assert text.endswith(answer)
+            assert text == "\u200b" + answer
             await stop(chat, task)
     run(scenario)
 
@@ -622,3 +621,14 @@ def test_reconnect_requests_right_after_each_login_back_off():
             assert sum(gaps[1:]) >= 1.5, gaps
             await stop(chat, task)
     run(scenario, timeout=30)
+
+
+
+@pytest.mark.parametrize("slow, gap", [("30", 30.0), ("120", 120.0), ("121", 120.0),
+                                       ("9" * 400, 120.0), ("0", 0.0)])
+def test_slow_mode_is_read_up_to_twitchs_maximum(slow, gap):
+    """Twitch's slow mode is 3-120 s; a bigger value (or one that overflows to
+    inf) would hold every answer for that channel until it ages out."""
+    from twitch_bridge.chat import _seconds
+
+    assert _seconds(slow) == gap

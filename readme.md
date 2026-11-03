@@ -1,4 +1,4 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Independent review: reply parts never start like a command; bot loops bounded.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: CodeRabbit on PR #2: the no-asker case of the command guard.
 
 # HiveMind Twitch Bridge
 
@@ -18,7 +18,7 @@ New here? [docs/setup.md](docs/setup.md) walks through it from scratch: the Twit
 - Connects to Twitch chat over its WebSocket endpoint, `wss://irc-ws.chat.twitch.tv:443` (TCP 443 is the only port it needs), with the IRCv3 `twitch.tv/tags` and `twitch.tv/commands` capabilities.
 - Joins exactly the channels you list, and only answers there. Whispers are never answered.
 - Forwards only messages that mention the bot (`@botlogin what time is it`) or reply to one of its messages, with the mention removed, so the hub is asked `what time is it`.
-- Posts the hub's `speak` as a Twitch reply (threaded under the question), split into messages of at most 500 characters, each starting with `@asker`, so no part can run as a Twitch command (`/ban`, `.timeout`).
+- Posts the hub's `speak` as a Twitch reply (threaded under the question), split into messages of at most 500 characters, each starting with `@asker` when the asker is known. Without an asker, a part that starts with `/` or `.` begins with an invisible guard (U+200B) instead, so no part can run as a Twitch command (`/ban`, `.timeout`).
 - Stops answering an account's replies after 8 in 10 minutes in a channel, so two bots cannot answer each other forever.
 - Stays under Twitch's chat limits for an account that is not a moderator: at most 18 messages in any 30 seconds for the whole account (Twitch's limit is 20, counted per user, so it also holds per channel), at least 1.1 s between messages in one channel, longer in slow mode. Outgoing messages wait in a queue; an answer that waited more than 2 minutes is dropped.
 - Answers Twitch's PING, sends its own after a minute of silence, and reconnects with exponential backoff (at once when Twitch asks with RECONNECT), joining every channel again.

@@ -1,4 +1,4 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Independent review: reply parts, loop bound, reconnect backoff, test count.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: CodeRabbit on PR #2: the Reconnect row (first planned reconnect stays immediate), slow-mode cap, test count.
 
 # Quick facts: hivemind-twitch-bridge
 
@@ -18,7 +18,7 @@ Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Independent review: reply part
 | Noise key | `/home/bridge/.config/hivemind/unnamed-node_noise.key` (hivemind-bus-client default for an unnamed node) |
 | Default branch | `main` (upstream: `JarbasHiveMind/HiveMind-twitch-bridge`, branch `dev`) |
 | CI | `.github/workflows/ci.yml`: tests on Python 3.12 and 3.14, ruff `F,E9`, image smoke test, e2e through a real hub, publish on `main` |
-| Tests | `tests/`, 160 tests (`python -m pytest tests -q --ignore=tests/e2e`); `tests/e2e`, 5 tests (2 through a real hub, 3 opt-in against real Twitch) |
+| Tests | `tests/`, 167 tests (`python -m pytest tests -q --ignore=tests/e2e`); `tests/e2e`, 5 tests (2 through a real hub, 3 opt-in against real Twitch) |
 | HiveMind message types | sends `recognizer_loop:utterance`; handles `speak`, `hive.complete_intent_failure` |
 | License | Apache-2.0 |
 
@@ -50,12 +50,12 @@ Precedence: flag > variable > `<VARIABLE>_FILE`. A refresh token needs `TWITCH_C
 | Forwarded | `PRIVMSG` in a configured channel the bot has joined that mentions `@botlogin` or replies to the bot, mention removed; with `TWITCH_REQUIRE_MENTION=false`, every such `PRIVMSG`, the mention removed when present |
 | Never forwarded | whispers, the bot's own lines, other channels, a channel before its JOIN is confirmed or after the bot's PART, messages while the hub session is down |
 | Reply | `@reply-parent-msg-id=<id> PRIVMSG #<channel> :@<asker> <text>`, split at 500 characters (UTF-16 units), every part starting with `@<asker> `; with no asker, a part starting with `/` or `.` gets U+200B first (`COMMAND_GUARD`), so no part is a Twitch command |
-| Bot loops | at most 8 replies to the bot answered per account and channel in 10 min (`LOOP_MAX_REPLIES`, `LOOP_WINDOW`) |
-| Send limits | 18 per 30 s for the account (`MESSAGES_PER_WINDOW`), 1.1 s per channel (`CHANNEL_GAP`), slow mode honoured, 30 s pause on `msg_ratelimit` |
+| Bot loops | at most 8 replies to the bot answered per account and channel in 10 min (`LOOP_MAX_REPLIES`, `LOOP_WINDOW`); only replies that reached the hub count |
+| Send limits | 18 per 30 s for the account (`MESSAGES_PER_WINDOW`), 1.1 s per channel (`CHANNEL_GAP`), slow mode honoured (capped at 120 s, `MAX_SLOW_SECONDS`), 30 s pause on `msg_ratelimit` |
 | Queue | 50 messages per channel (`MAX_PENDING`); older than 120 s dropped (`MAX_AGE`) |
 | Joins | 15 per 10 s (`JOINS_PER_WINDOW`); unconfirmed channels joined again every 60 s (`JOIN_RETRY`), at once after the bot's own PART |
 | Keepalive | own `PING` after 60 s of silence (`KEEPALIVE`), reconnect if unanswered in 15 s (`PONG_TIMEOUT`); login must be welcomed in 20 s |
-| Reconnect | backoff `min(60, 2**attempt)` s times 0.5-1.0; immediate on `RECONNECT` or a token change, unless the session before lasted under 60 s (`STABLE_AFTER`): then the backoff again |
+| Reconnect | backoff `min(60, 2**attempt)` s times 0.5-1.0; immediate on `RECONNECT` or a token change; after sessions under 60 s (`STABLE_AFTER`), only the first such reconnect is immediate, later ones in a row back off |
 | Token calls | `https://id.twitch.tv` only, certificates verified, redirects never followed |
 | Token | refreshed at start and 10 min before expiry (`REFRESH_MARGIN`), validated hourly (`VALIDATE_EVERY`), one extra refresh if chat refuses a fresh token |
 | Ready | hub handshake live AND logged in AND every configured channel joined |

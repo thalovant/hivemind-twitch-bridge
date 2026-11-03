@@ -181,17 +181,21 @@ class SendLimiter:
 
 #: Longest reply id passed on to Twitch (its ids are 36-character UUIDs).
 MAX_MESSAGE_ID = 64
+#: Longest slow-mode wait Twitch sets, in seconds (it takes 3 to 120).
+MAX_SLOW_SECONDS = 120.0
 
 
 def _seconds(value: Optional[str]) -> Optional[float]:
     """A tag holding whole seconds (``slow=30``); None when it is not one.
 
     ``str.isdigit`` alone is not enough: ``"²".isdigit()`` is True, and
-    ``float("²")`` raises.
+    ``float("²")`` raises. The value is capped at ``MAX_SLOW_SECONDS``: a
+    bigger one (or a long one that overflows to inf) would hold every answer
+    for the channel until it ages out.
     """
     if not value or not (value.isascii() and value.isdigit()):
         return None
-    return float(value)
+    return min(float(value), MAX_SLOW_SECONDS)
 
 
 def _message_id(value) -> Optional[str]:

@@ -95,3 +95,26 @@ def test_the_reply_chain_memory_is_bounded(monkeypatch):
         bridge.handle_chat_message(said("@hivebot hi", login=f"user{number}", reply_parent="hivebot"))
     assert len(hub.utterances()) == 50
     assert len(bridge._reply_chains) <= 10
+
+
+
+@pytest.mark.parametrize("failure", ["hub_down", "emit_raises"])
+def test_a_reply_that_never_reached_the_hub_does_not_count_toward_the_chain(failure, monkeypatch):
+    import twitch_bridge as bridge_module
+
+    bridge, hub = make()
+    if failure == "hub_down":
+        hub.handshake_event.clear()
+    else:
+        monkeypatch.setattr(hub, "emit", lambda message: (_ for _ in ()).throw(RuntimeError("down")))
+    for turn in range(bridge_module.LOOP_MAX_REPLIES + 2):
+        bridge.handle_chat_message(said(f"@hivebot try {turn}", login="carol", reply_parent="hivebot"))
+    assert hub.utterances() == []
+    # the hub is back: carol's replies are answered as if nothing was counted
+    if failure == "hub_down":
+        hub.handshake_event.set()
+    else:
+        monkeypatch.undo()
+    bridge.handle_chat_message(said("@hivebot now?", login="carol", reply_parent="hivebot"))
+    assert [m.data["utterances"][0] for m in hub.utterances()] == ["now?"]
+    assert len(bridge._reply_chains[("alpha", "carol")]) == 1

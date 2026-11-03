@@ -216,3 +216,21 @@ def test_a_refresh_token_wins_over_a_static_token():
 def test_some_token_is_required():
     with pytest.raises(ValueError):
         TwitchAuth("hivebot", client_id="cid", client_secret="secret")
+
+
+def test_a_validation_that_failed_at_start_is_tried_again_soon_not_in_an_hour():
+    with FakeTwitchId() as server:
+        server.access["static-1"] = "hivebot"
+        server.validate_answers.append((503, {"message": "unavailable"}))
+        auth = TwitchAuth("hivebot", access_token="static-1", base_url=server.url,
+                          retry_cap=0.2)
+
+        async def scenario():
+            await auth.start()
+            keeper = asyncio.create_task(auth.run())
+            while len(server.validations()) < 2:
+                await asyncio.sleep(0.02)
+            keeper.cancel()
+
+        run(scenario(), timeout=5)
+        assert len(server.validations()) == 2

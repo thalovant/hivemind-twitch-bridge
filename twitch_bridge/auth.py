@@ -143,6 +143,7 @@ class TwitchAuth:
         except _Transient as error:
             LOG.warning(f"could not validate the Twitch token ({error}); "
                         f"trying chat with it anyway")
+            self._retry_validation_soon()
 
     async def run(self) -> None:
         """Validate hourly and refresh before expiry, until cancelled."""
@@ -164,7 +165,11 @@ class TwitchAuth:
             except _Transient as error:
                 LOG.warning(f"could not validate the Twitch token ({error}); "
                             f"trying again in {self.retry_cap:.0f} s")
-                self._validated_at = time.monotonic() - self.validate_every + self.retry_cap
+                self._retry_validation_soon()
+
+    def _retry_validation_soon(self) -> None:
+        """Schedule the next validation ``retry_cap`` seconds from now, not an hour."""
+        self._validated_at = time.monotonic() - self.validate_every + self.retry_cap
 
     async def refresh(self) -> None:
         """Refresh now (chat refused the token). Raises TokenRejected without a refresh token."""

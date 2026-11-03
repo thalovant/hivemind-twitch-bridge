@@ -1,8 +1,8 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: first audit of the Thalovant fork: upstream defects (fixed) and the known limits of the new client.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: review findings fixed (hub refusal race, port ranges, fresh-token 401, PART rejoin, joined-only delivery, sender robustness, tag keys, secrets in the build context and the docs); line references moved to b50c55945e3e.
 
 # Audit: hivemind-twitch-bridge
 
-Evidence: `python -m pytest tests -q --ignore=tests/e2e` (116 passed, Python 3.12 and 3.14), `python -m pytest tests/e2e/test_twitch_hivemind_e2e.py` (2 passed through a real hivemind-core 5.3.10a1 hub), `TWITCH_LIVE=1 python -m pytest tests/e2e/test_twitch_live.py` (2 passed against real Twitch chat, 1 skipped: it needs a bot token), a mutation pass (21 source mutations, each failed a test), the image run in MAINTENANCE_REPORT.md, and reading the code at commit `21a8cd2b3aab` (line numbers below refer to it). Upstream findings were reproduced against upstream's `twitch_bridge/twitch.py` at `dde4b89` with a local IRC server.
+Evidence: `python -m pytest tests -q --ignore=tests/e2e` (133 passed, Python 3.12 and 3.14), `python -m pytest tests/e2e/test_twitch_hivemind_e2e.py` (2 passed through a real hivemind-core 5.3.10a1 hub), `TWITCH_LIVE=1 python -m pytest tests/e2e/test_twitch_live.py` (2 passed against real Twitch chat, 1 skipped: it needs a bot token), a mutation pass (21 source mutations, each failed a test) and a revert check for each review fix (8, each failed its test), the image run in MAINTENANCE_REPORT.md, and reading the code at commit `b50c55945e3e` (line numbers below refer to it). Upstream findings were reproduced against upstream's `twitch_bridge/twitch.py` at `dde4b89` with a local IRC server.
 
 ## Fixed: upstream's IRC client could not hold a session
 
@@ -14,18 +14,29 @@ Evidence: `python -m pytest tests -q --ignore=tests/e2e` (116 passed, Python 3.1
 
 - **Where (upstream):** `JarbasTwitchBridge.on_twitch_message` at `dde4b89` (`tag.lower() in utterance` with default `@bot`).
 - **Finding:** `@botany` or any text containing `@bot` was forwarded, and the bot's real login was not a trigger.
-- **Now:** `HiveMindTwitchBridge.addressed_text` (`twitch_bridge/__init__.py:313`) matches `@<bot login>` as a whole word or a reply to the bot; `tests/test_mentions.py`.
+- **Now:** `HiveMindTwitchBridge.addressed_text` (`twitch_bridge/__init__.py:326`) matches `@<bot login>` as a whole word or a reply to the bot; `tests/test_mentions.py`.
+
+## Fixed after review (pull request #1)
+
+- **Hub refusal before the event loop:** `_hub_refused` used to drop a stop asked for before `_run` set the loop, leaving the bridge up without a hub. Now kept in `_pending_stop` under `_loop_lock` (`twitch_bridge/__init__.py`). Test: `tests/test_bridge.py::test_a_hub_refusal_before_the_loop_starts_still_stops_the_bridge`.
+- **Port ranges:** `BRIDGE_HEALTH_PORT` and `HIVEMIND_PORT` outside their range exit 2 (`resolve_options`). Test: `tests/test_cli.py::test_malformed_values_are_refused`.
+- **A just-issued token refused by `/validate`:** raises `TokenRejected` (`TwitchAuth._validate_fresh`). Test: `tests/test_auth.py::test_a_freshly_issued_token_that_validate_refuses_is_token_rejected`.
+- **PART:** wakes the join loop (`TwitchChat._rejoin`), so the channel is joined again at once. Test: `tests/test_chat.py::test_leaving_a_channel_makes_the_bridge_not_ready_and_it_joins_again_at_once`.
+- **Delivery:** only from joined channels (`TwitchChat._deliver`). Test: `tests/test_chat.py::test_nothing_is_delivered_from_a_channel_the_bot_is_not_in`.
+- **Sender:** a reply id of another type is turned into text, a mention that is not a login is ignored, an unsendable answer is dropped and the send loop survives any error (`TwitchChat.say`, `_send_next`, `_send_loop`). Tests: `tests/test_chat.py::test_a_reply_id_or_mention_of_another_type_cannot_stop_the_sender`, `test_the_sender_survives_an_item_it_cannot_send`, `tests/test_bridge.py::test_a_reply_id_of_another_type_from_the_hub_is_still_sent`.
+- **Tag keys:** `format_line` refuses a key that is not IRCv3 key syntax and a value that is not text. Test: `tests/test_irc.py::test_a_tag_key_cannot_smuggle_anything`.
+- **Secrets:** `.dockerignore` and `.gitignore` exclude `.env`, `.env.*` and `secrets`, so `COPY . /app` cannot bake a local secret into the image; the README's `docker run` passes secrets as `*_FILE` mounts instead of `-e` arguments.
 
 ## 1. A channel Twitch never confirms keeps the bridge not ready
 
-- **Where:** `TwitchChat.ready` and `_join_until_cancelled` (`twitch_bridge/chat.py:491`, warning at `:505`).
+- **Where:** `TwitchChat.ready` and `_join_until_cancelled` (`twitch_bridge/chat.py:496`, warning at `:514`).
 - **Finding:** Twitch silently drops a JOIN to a channel that does not exist. By contract `/readyz` needs every channel, so one misspelt or renamed channel makes the whole bridge not ready, while it does answer in the others. Test: `tests/test_chat.py::test_not_ready_until_every_channel_is_joined_and_missing_joins_are_retried`.
 - **Impact:** an operator sees a not-ready pod and must read the log line naming the channel.
 
 ## 2. No bridge-side limit on incoming questions
 
-- **Where:** `HiveMindTwitchBridge.handle_chat_message` / `forward_to_hivemind` (`twitch_bridge/__init__.py:301`, `:336`).
-- **Finding:** every addressed message is forwarded at once. Anyone in an allowed channel can mention the bot repeatedly; only the hub's quotas slow them down. Outgoing answers are limited (`SendLimiter`), so a flood ends in dropped answers (`MAX_PENDING`, `chat.py:531`; `MAX_AGE`, `:557`) rather than a Twitch lockout.
+- **Where:** `HiveMindTwitchBridge.handle_chat_message` / `forward_to_hivemind` (`twitch_bridge/__init__.py:314`, `:349`).
+- **Finding:** every addressed message is forwarded at once. Anyone in an allowed channel can mention the bot repeatedly; only the hub's quotas slow them down. Outgoing answers are limited (`SendLimiter`), so a flood ends in dropped answers (`MAX_PENDING`, `chat.py:546`; `MAX_AGE`, `:577`) rather than a Twitch lockout.
 
 ## 3. Every start mints a new access token
 
@@ -39,12 +50,12 @@ Evidence: `python -m pytest tests -q --ignore=tests/e2e` (116 passed, Python 3.1
 
 ## 5. A refused login is retried once in refresh mode, never in static mode
 
-- **Where:** `HiveMindTwitchBridge._run_chat` (`twitch_bridge/__init__.py:232`).
+- **Where:** `HiveMindTwitchBridge._run_chat` (`twitch_bridge/__init__.py:241`).
 - **Finding:** when chat refuses a freshly refreshed token the bridge refreshes once more before writing `token_rejected` (`tests/test_bridge.py::test_chat_refusing_a_refreshed_token_gets_one_more_refresh`). A `TWITCH_OAUTH_TOKEN` gets no second chance (`test_a_chat_login_twitch_refuses_writes_token_rejected_and_exits_3`).
 
 ## 6. Answers depend on the hub keeping the question's context
 
-- **Where:** `HiveMindTwitchBridge._reply` (`twitch_bridge/__init__.py:370`).
+- **Where:** `HiveMindTwitchBridge._reply` (`twitch_bridge/__init__.py:383`).
 - **Finding:** a `speak` is posted only if its context still carries `twitch_channel` (and, for a threaded reply, `twitch_message_id`). A skill that emits `speak` with a fresh context is dropped silently. Test: `tests/test_bridge.py::test_answers_for_other_bridges_or_channels_are_not_posted`; the real hub keeps the context (`tests/e2e/test_twitch_hivemind_e2e.py`).
 
 ## 7. Twitch drops a repeated identical message
@@ -54,7 +65,7 @@ Evidence: `python -m pytest tests -q --ignore=tests/e2e` (116 passed, Python 3.1
 
 ## 8. The fallback reply is English only
 
-- **Where:** `twitch_bridge/__init__.py:368`.
+- **Where:** `twitch_bridge/__init__.py:381`.
 - **Finding:** `hive.complete_intent_failure` always answers "I don't know how to answer that", whatever `HIVEMIND_LANG` is.
 
 ## 9. The HiveMind client uses the shared identity

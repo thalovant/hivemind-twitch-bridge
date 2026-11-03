@@ -1,6 +1,10 @@
 .git
 .github
 .venv*
+# local secrets (docker-compose reads .env; the docker run example uses ./secrets)
+.env
+.env.*
+secrets
 **/__pycache__
 **/*.pyc
 .pytest_cache

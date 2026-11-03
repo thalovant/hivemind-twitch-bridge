@@ -1,4 +1,4 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Twitch chat over WebSocket, token refresh, settings from the environment, health endpoints, signed image.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: review: the docker run example passes secrets as files, not as arguments.
 
 # HiveMind Twitch Bridge
 
@@ -68,9 +68,9 @@ Every setting comes from the environment; each also has a flag (`hivemind-twitch
 | `TWITCH_OAUTH_TOKEN` (`_FILE`) | none | a plain access token for short tests, used when no refresh token is set; a `_FILE` is read again at every login |
 | `TWITCH_REQUIRE_MENTION` | `true` | `false` forwards every message in the channels |
 | `TWITCH_SESSION_SCOPE` | `person` | `person`: one hub session per person per channel (`twitch-<channel>-<user id>`); `chat`: one per channel (`twitch-<channel>`) |
-| `BRIDGE_HEALTH_PORT` | off | serve `/healthz` and `/readyz` on this port |
+| `BRIDGE_HEALTH_PORT` | off | serve `/healthz` and `/readyz` on this port (0-65535) |
 | `HIVEMIND_HOST` | identity file | hub address, `ws://` or `wss://` (`ws://` is added when missing) |
-| `HIVEMIND_PORT` | `5678` | hub port |
+| `HIVEMIND_PORT` | `5678` | hub port (1-65535) |
 | `HIVEMIND_ACCESS_KEY` (`_FILE`) | identity file | the bridge's access key on the hub |
 | `HIVEMIND_PASSWORD` (`_FILE`) | identity file | its password |
 | `HIVEMIND_SITE_ID` | `twitch` | this bridge's HiveMind site id |
@@ -83,17 +83,26 @@ Exit statuses: `0` stopped (SIGTERM or SIGINT), `1` the hub is unreachable or re
 
 ## Docker
 
+Put each secret in its own file under `./secrets`, readable by the container's user and nobody else (`chown 10001 secrets/* && chmod 0400 secrets/*`); `.gitignore` and `.dockerignore` keep the directory out of git and out of the image. Then:
+
 ```bash
 docker build -t hivemind-twitch-bridge .
 docker run --rm --read-only --tmpfs /tmp \
   -v twitch-identity:/home/bridge/.config/hivemind \
-  -e TWITCH_BOT_LOGIN=... -e TWITCH_ALLOWED_CHANNELS=... \
-  -e TWITCH_CLIENT_ID=... -e TWITCH_CLIENT_SECRET=... -e TWITCH_REFRESH_TOKEN=... \
-  -e HIVEMIND_ACCESS_KEY=... -e HIVEMIND_PASSWORD=... -e HIVEMIND_HOST=ws://hivemind-core \
+  -v "$PWD/secrets:/run/secrets:ro" \
+  -e TWITCH_BOT_LOGIN=mybot -e TWITCH_ALLOWED_CHANNELS=mychannel \
+  -e TWITCH_CLIENT_ID=... \
+  -e TWITCH_CLIENT_SECRET_FILE=/run/secrets/twitch_client_secret \
+  -e TWITCH_REFRESH_TOKEN_FILE=/run/secrets/twitch_refresh_token \
+  -e HIVEMIND_ACCESS_KEY_FILE=/run/secrets/hivemind_access_key \
+  -e HIVEMIND_PASSWORD_FILE=/run/secrets/hivemind_password \
+  -e HIVEMIND_HOST=ws://hivemind-core \
   hivemind-twitch-bridge
 ```
 
-or `docker-compose.yml`. The image runs as `bridge` (uid 10001) with `HOME=/home/bridge` and no default arguments. It writes only to `/home/bridge/.config/hivemind` (the HiveMind identity and the Noise static key, `unnamed-node_noise.key`) and `/tmp`, so the root filesystem can be read-only. Keep the identity directory on a volume if the hub pins the bridge's key.
+A secret given as `-e NAME=value` would sit in the `docker run` command line, which any local user can read for as long as the container runs. `docker-compose.yml` is the other way to run it.
+
+The image runs as `bridge` (uid 10001) with `HOME=/home/bridge` and no default arguments. It writes only to `/home/bridge/.config/hivemind` (the HiveMind identity and the Noise static key, `unnamed-node_noise.key`) and `/tmp`, so the root filesystem can be read-only. Keep the identity directory on a volume if the hub pins the bridge's key.
 
 Signed images are published as `ghcr.io/thalovant/hivemind-twitch-bridge:sha-<commit>` and `:latest` (cosign keyless, verified against `.github/workflows/ci.yml@refs/heads/main`).
 

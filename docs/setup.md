@@ -1,4 +1,4 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: rewritten for the WebSocket client, token refresh and settings from the environment.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: review: install step before running the bridge.
 
 # Setup: from nothing to a working Twitch bot
 
@@ -48,6 +48,16 @@ hivemind-core allow-msg speak <client_id>
 The access key and password are `HIVEMIND_ACCESS_KEY` and `HIVEMIND_PASSWORD`. Use a long random password: the hub's password handshake can refuse one that is easy to guess (`WeakPasswordError` in the hub's log), and the bridge then sees only closed connections until its handshake retries run out.
 
 ## 5. Run it
+
+Install the package once, from a clone of the repository (or use the image, see the README):
+
+```bash
+git clone https://github.com/thalovant/hivemind-twitch-bridge.git
+cd hivemind-twitch-bridge
+pip install .
+```
+
+Then:
 
 ```bash
 export TWITCH_BOT_LOGIN=mybot

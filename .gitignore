@@ -7,3 +7,6 @@ dist/
 .venv/
 .venv-e2e/
 .venv-314/
+.env
+.env.*
+secrets/

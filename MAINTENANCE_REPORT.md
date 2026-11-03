@@ -1,6 +1,18 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Thalovant fork set up: WebSocket chat client, token refresh, managed-bridge contract, CI and signed images, docs set.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: review round on pull request #1: eleven findings fixed.
 
 # Maintenance report: hivemind-twitch-bridge
+
+## 2026-11-03: review round on pull request #1
+
+**Changes** (commit `b50c559` for the code, then the docs commit): the eleven review threads, all valid. Code: a hub refusal before the event loop starts is kept and acted on; `BRIDGE_HEALTH_PORT` (0-65535) and `HIVEMIND_PORT` (1-65535) are range-checked (exit 2); `/validate` refusing a just-issued token raises `TokenRejected`; the bot's own PART rejoins at once; chat lines are delivered only from joined channels; `say()` coerces a reply id of another type and ignores a non-login mention, an unsendable answer is dropped and the send loop survives any error; `format_line` checks tag keys and values. Docs and build: `.env`, `.env.*` and `secrets` excluded from the build context and git; the README's `docker run` passes secrets as files; `docs/setup.md` has its install step back; QUICK_FACTS describes forwarding without `TWITCH_REQUIRE_MENTION`.
+
+**Verification:** `python -m pytest tests -q --ignore=tests/e2e`: 133 passed on Python 3.12.12 and 3.14.8; each of the 8 code fixes reverted alone makes its new test fail; `ruff check --isolated --select F,E9 .` clean; `tests/e2e/test_twitch_hivemind_e2e.py`: 2 passed through a real hub; `TWITCH_LIVE=1 tests/e2e/test_twitch_live.py`: 2 passed, 1 skipped (needs a bot token).
+
+**Transparency report**
+
+- **AI model:** Claude Opus 5.5 (`claude-opus-5-5`), in Claude Code.
+- **Actions taken:** read the eleven review threads, checked each against the code, fixed all eleven with tests for the code ones, replied on and resolved each thread.
+- **Oversight:** requested by the session lead; findings from an automated reviewer; no human code review yet.
 
 ## 2026-11-03: Thalovant fork
 

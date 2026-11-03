@@ -61,3 +61,37 @@ def test_the_bots_own_lines_and_other_channels_never_reach_the_hub():
     bridge.handle_chat_message(said("@hivebot hello", login="hivebot"))
     bridge.handle_chat_message(said("@hivebot hello", channel="elsewhere"))
     assert hub.utterances() == []
+
+
+def test_two_bots_answering_each_others_replies_stop_after_a_bounded_chain(monkeypatch):
+    """Another bridge answers the bot's reply with a Twitch reply that starts
+    with "@hivebot": each answer is addressed to the other, without end."""
+    import twitch_bridge as bridge_module
+
+    clock = [1000.0]
+    monkeypatch.setattr(bridge_module.time, "monotonic", lambda: clock[0])
+    bridge, hub = make()
+    for turn in range(bridge_module.LOOP_MAX_REPLIES + 5):
+        bridge.handle_chat_message(said(f"@hivebot answer {turn}", login="otherbot",
+                                        reply_parent="hivebot"))
+        clock[0] += 2.0
+    assert len(hub.utterances()) == bridge_module.LOOP_MAX_REPLIES
+    # someone else, and a fresh question from the same account, still get answers
+    bridge.handle_chat_message(said("@hivebot hi", login="carol", reply_parent="hivebot"))
+    bridge.handle_chat_message(said("@hivebot a new question", login="otherbot"))
+    assert len(hub.utterances()) == bridge_module.LOOP_MAX_REPLIES + 2
+    # and once the window has passed, replies are answered again
+    clock[0] += bridge_module.LOOP_WINDOW
+    bridge.handle_chat_message(said("@hivebot later", login="otherbot", reply_parent="hivebot"))
+    assert len(hub.utterances()) == bridge_module.LOOP_MAX_REPLIES + 3
+
+
+def test_the_reply_chain_memory_is_bounded(monkeypatch):
+    import twitch_bridge as bridge_module
+
+    monkeypatch.setattr(bridge_module, "LOOP_MEMORY", 10)
+    bridge, hub = make()
+    for number in range(50):
+        bridge.handle_chat_message(said("@hivebot hi", login=f"user{number}", reply_parent="hivebot"))
+    assert len(hub.utterances()) == 50
+    assert len(bridge._reply_chains) <= 10

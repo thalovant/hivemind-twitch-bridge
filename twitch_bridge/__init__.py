@@ -30,7 +30,9 @@ import asyncio
 import re
 import signal
 import threading
-from typing import Iterable, Optional
+import time
+from collections import OrderedDict, deque
+from typing import Deque, Iterable, Optional, Tuple
 
 from hivemind_bus_client import (
     HiveMessage,
@@ -55,6 +57,15 @@ DEFAULT_HANDSHAKE_MAX_RETRIES = 10
 #: ``person``: one hub session per person in each channel. ``chat``: one per
 #: channel, shared by everyone in it.
 SESSION_SCOPES = ("person", "chat")
+
+#: Replies to the bot's own messages answered, per account and channel, within
+#: ``LOOP_WINDOW`` seconds; more are not answered until the window has passed.
+#: Another bot (another HiveMind bridge, say) answers the bot's reply with a
+#: Twitch reply addressed to it, and the two would answer each other forever.
+LOOP_MAX_REPLIES = 8
+LOOP_WINDOW = 600.0
+#: Accounts whose reply chains are remembered (least recently seen dropped).
+LOOP_MEMORY = 1024
 
 #: Where Kubernetes reads a container's termination message.
 TERMINATION_LOG = "/dev/termination-log"
@@ -158,6 +169,10 @@ class HiveMindTwitchBridge:
         # the hub refusing the bridge right after the handshake
         self._loop_lock = threading.Lock()
         self._pending_stop: Optional[int] = None
+        # (channel, login) -> when the bot answered that account's replies to it
+        # (event loop only)
+        self._reply_chains: "OrderedDict[Tuple[str, str], Deque[float]]" = OrderedDict()
+        self._loop_warned: set = set()
 
     # ------------------------------------------------------------------
     # lifecycle
@@ -318,10 +333,40 @@ class HiveMindTwitchBridge:
         text = self.addressed_text(message)
         if text is None:
             return
+        if message.reply_parent_login == self.bot_login and not self._chain_allows(message):
+            return
         if not self.hub_live():
             LOG.warning("dropping a Twitch message: the HiveMind session is down")
             return
         self.forward_to_hivemind(text, message)
+
+    def _chain_allows(self, message: ChatMessage) -> bool:
+        """Whether one more reply to the bot from this account may be answered.
+
+        At most ``LOOP_MAX_REPLIES`` in ``LOOP_WINDOW`` seconds per account and
+        channel: what two bots answering each other's replies look like, and
+        far more than a person asks in a row. A new question (not a reply) is
+        not counted, and other accounts are not affected.
+        """
+        key = (message.channel, message.user_login)
+        now = time.monotonic()
+        answered = self._reply_chains.pop(key, None) or deque()
+        self._reply_chains[key] = answered  # now the most recently seen
+        while answered and now - answered[0] >= LOOP_WINDOW:
+            answered.popleft()
+        while len(self._reply_chains) > LOOP_MEMORY:
+            dropped, _ = self._reply_chains.popitem(last=False)
+            self._loop_warned.discard(dropped)
+        if len(answered) >= LOOP_MAX_REPLIES:
+            if key not in self._loop_warned:
+                self._loop_warned.add(key)
+                LOG.warning(f"not answering more replies from {message.user_login} in "
+                            f"#{message.channel}: {len(answered)} within {LOOP_WINDOW:.0f} s "
+                            "look like two bots answering each other")
+            return False
+        self._loop_warned.discard(key)
+        answered.append(now)
+        return True
 
     def addressed_text(self, message: ChatMessage) -> Optional[str]:
         """The text to forward, mention removed; None when it is not for the bot.
@@ -412,5 +457,6 @@ def _channel_login(channel: str) -> str:
 
 
 __all__ = ["HiveMindTwitchBridge", "platform", "DEFAULT_HANDSHAKE_MAX_RETRIES",
+           "LOOP_MAX_REPLIES", "LOOP_WINDOW",
            "SESSION_SCOPES", "EXIT_OK", "EXIT_HUB_FAILED", "EXIT_TOKEN_REJECTED",
            "EXIT_CLIENT_REJECTED"]

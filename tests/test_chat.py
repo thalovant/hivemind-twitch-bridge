@@ -599,3 +599,26 @@ def test_an_odd_reply_id_from_the_hub_still_sends_the_answer_without_it(reply_to
             assert "\x00" not in "".join(server.lines())
             await stop(chat, task)
     run(scenario)
+
+
+def test_reconnect_requests_right_after_each_login_back_off():
+    """The first RECONNECT is followed at once; one after every fresh login is
+    a reconnect storm, and gets the backoff."""
+    async def scenario():
+        async with FakeTwitch() as server:
+            chat = make_chat(server, channels=("alpha",), backoff_base=0.5, backoff_cap=4.0)
+            task = await started(chat)
+            gaps = []
+            for number in range(1, 5):
+                await until(lambda: server.connections == number and chat.ready(),
+                            what=f"login {number}")
+                began = time.monotonic()
+                await server.push(":tmi.twitch.tv RECONNECT")
+                await until(lambda: server.connections == number + 1, timeout=10,
+                            what=f"connection {number + 1}")
+                gaps.append(time.monotonic() - began)
+            assert gaps[0] < 0.25, gaps          # Twitch's own request: at once
+            assert min(gaps[1:]) >= 0.25, gaps   # then 0.5 * 2**n * [0.5, 1]
+            assert sum(gaps[1:]) >= 1.5, gaps
+            await stop(chat, task)
+    run(scenario, timeout=30)

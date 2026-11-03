@@ -303,6 +303,9 @@ class TwitchChat:
         self._send_lock = asyncio.Lock()
         sender = asyncio.create_task(self._send_loop(), name="twitch-send")
         attempt = 0
+        # planned reconnects in a row, each after a session shorter than
+        # STABLE_AFTER: the first is immediate, the next ones back off
+        planned = 0
         try:
             while not self._stop.is_set():
                 self._planned_reconnect = False
@@ -321,7 +324,14 @@ class TwitchChat:
                 if self._stop.is_set():
                     break
                 if self._planned_reconnect:
-                    attempt, delay = 0, 0.0
+                    if stable:
+                        planned = 0
+                    delay = 0.0 if planned == 0 else self._backoff(planned - 1)
+                    planned += 1
+                    attempt = 0
+                    if delay:
+                        LOG.info(f"Twitch asked for another reconnect right after a login; "
+                                 f"reconnecting in {delay:.1f} s")
                 else:
                     if stable:
                         attempt = 0

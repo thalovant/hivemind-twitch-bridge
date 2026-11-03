@@ -115,9 +115,30 @@ def test_valid_tag_keys_and_a_non_text_value():
 
 def test_a_repeated_prefix_starts_every_part_and_fits():
     from twitch_bridge.irc import split_message
-    parts = split_message("word " * 300 + "x" * 1200, prefix="@alice ", repeat_prefix=True)
+    text = "word " * 300 + "x" * 1200
+    parts = split_message(text, prefix="@alice ", repeat_prefix=True)
     assert len(parts) > 3
     assert all(part.startswith("@alice ") and chat_length(part) <= MAX_MESSAGE_LENGTH
+               for part in parts)
+    bodies = "".join(part[len("@alice "):] for part in parts)
+    assert bodies.replace(" ", "") == text.replace(" ", "")
+
+
+@pytest.mark.parametrize("repeat_prefix", [True, False])
+def test_a_prefix_must_leave_room_for_a_two_unit_character(repeat_prefix):
+    """A prefix of 499 units and an emoji (two UTF-16 units) cannot share a
+    500-unit message: a prefix-only part, then a 501-unit one, came out."""
+    from twitch_bridge.irc import split_message
+    with pytest.raises(ValueError):
+        split_message("\U0001F600" * 10, prefix="p" * 499, repeat_prefix=repeat_prefix)
+
+
+def test_the_longest_allowed_prefix_still_fits_every_part():
+    from twitch_bridge.irc import split_message
+    prefix = "p" * 498
+    parts = split_message("\U0001F600" * 10, prefix=prefix, repeat_prefix=True)
+    assert len(parts) == 10
+    assert all(part == prefix + "\U0001F600" and chat_length(part) == MAX_MESSAGE_LENGTH
                for part in parts)
 
 

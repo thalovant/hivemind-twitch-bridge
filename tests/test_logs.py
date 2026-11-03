@@ -53,7 +53,7 @@ def test_neither_text_nor_tokens_are_logged(monkeypatch, caplog):
         assert secret not in everything, secret
 
 
-def test_a_failure_while_handling_text_never_puts_the_text_in_a_log(caplog):
+def test_a_failure_while_handling_text_never_puts_the_text_in_a_log(caplog, capfd):
     """A traceback carries the exception's text, and asyncio logs a failed
     callback with its arguments: the question or the answer, both times."""
     import asyncio
@@ -91,6 +91,12 @@ def test_a_failure_while_handling_text_never_puts_the_text_in_a_log(caplog):
         runner.join(5)
         loop.close()
 
-    assert caplog.records, "nothing was logged; the test would prove nothing"
-    assert SECRET_QUESTION not in caplog.text
-    assert SECRET_ANSWER not in caplog.text
+    # the bridge's own logger prints to the process output and does not
+    # propagate to caplog; asyncio's does. Read both, as an operator would.
+    out, err = capfd.readouterr()
+    printed = "\n".join((caplog.text, out, err))
+    assert SECRET_QUESTION not in printed
+    assert SECRET_ANSWER not in printed
+    # what is logged instead: which failure it was
+    assert "the chat message handler failed (ValueError)" in printed
+    assert "could not queue a reply for #alpha (RuntimeError)" in printed

@@ -184,8 +184,13 @@ def split_message(text: str, limit: int = MAX_MESSAGE_LENGTH, prefix: str = "",
     Breaks between words where it can and inside a word only when one word is
     longer than a whole message. ``prefix`` (``"@alice "``) starts the first
     message, or every message with ``repeat_prefix``, and counts toward its
-    length.
+    length; it must leave room for a two-unit character (``ValueError``
+    otherwise), so no part is the prefix alone or over ``limit``.
     """
+    if prefix and chat_length(prefix) > limit - 2:
+        # a part must hold the prefix and at least one character, and an
+        # emoji outside the BMP counts two units
+        raise ValueError("the prefix must leave room for a two-unit character")
     text = clean_text(text)
     if not text:
         return []

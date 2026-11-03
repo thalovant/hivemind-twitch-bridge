@@ -1,73 +1,74 @@
-# Setup Walkthrough
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: rewritten for the WebSocket client, token refresh and settings from the environment.
 
-This page takes you from nothing to a working Twitch chat bot backed by a HiveMind hub.
+# Setup: from nothing to a working Twitch bot
 
-## How the bridge fits together
+This takes a Twitch account for the bot, a HiveMind hub and a machine (or container) that can reach both over TCP 443 (Twitch) and the hub's port.
 
-The bridge is a HiveMind satellite with two connections:
+## 1. The bot's Twitch account
 
-- **To Twitch**: it joins the channel's IRC chat with a bot account and OAuth token and listens for messages.
-- **To the HiveMind hub**: it connects as a HiveMind terminal using an access key.
+Create (or pick) the Twitch account the bot will chat as. Its **login** (the lowercase name in `twitch.tv/<login>`) is `TWITCH_BOT_LOGIN`. Some channels only let accounts with a verified phone number chat; Twitch then answers with the notice `msg_requires_verified_phone_number`, which the bridge logs by its id.
 
-A chat message that contains a trigger tag becomes a `recognizer_loop:utterance` sent to the hub. The sender's username travels in the message context, so the hub's `speak` reply is echoed back to the channel, addressed to that user.
+## 2. A Twitch application
+
+At <https://dev.twitch.tv/console/apps>, register an application:
+
+- **OAuth Redirect URL**: where your consent flow lands, for example `http://localhost:3000` for a one-off manual flow;
+- **Client Type**: **Confidential**. A confidential client's refresh token does not expire; a public client's expires after 30 days.
+
+Note the **Client ID** and create a **Client Secret**: they are `TWITCH_CLIENT_ID` and `TWITCH_CLIENT_SECRET`.
+
+## 3. The bot's consent (refresh token)
+
+Signed in to Twitch **as the bot account**, open:
 
 ```
-Twitch chat (IRC)  ⇄  bridge  ⇄  HiveMind hub  ⇄  OVOS pipeline / skills
+https://id.twitch.tv/oauth2/authorize?response_type=code&client_id=<CLIENT_ID>&redirect_uri=<REDIRECT_URL>&scope=chat%3Aread+chat%3Aedit
 ```
 
-## Step 1: Stand up a HiveMind hub
-
-Install and run [hivemind-core](https://github.com/JarbasHiveMind/HiveMind-core):
+Approve, and copy the `code` from the address you are sent to. Exchange it:
 
 ```bash
-pip install hivemind-core
-hivemind-core listen
+curl -X POST https://id.twitch.tv/oauth2/token \
+  -d client_id=<CLIENT_ID> -d client_secret=<CLIENT_SECRET> \
+  -d code=<CODE> -d grant_type=authorization_code -d redirect_uri=<REDIRECT_URL>
 ```
 
-The hub listens on port `5678` by default.
+The answer holds `access_token` and `refresh_token`. Keep the **refresh token** (`TWITCH_REFRESH_TOKEN`); the bridge gets its own access tokens from it on every start and before each one expires. The bridge keeps the access token, and any new refresh token Twitch hands out, in memory only: a restart starts again from the refresh token you stored.
 
-## Step 2: Register the bridge as a client
+For a quick test you can skip the application and pass any user access token with `chat:read` and `chat:edit` as `TWITCH_OAUTH_TOKEN`. It is not refreshed.
 
-On the hub machine:
+## 4. Register the bridge on the hub
 
 ```bash
-hivemind-core add-client --name twitch-bridge \
-  --access-key "your-access-key" --password "your-password"
+hivemind-core add-client
+hivemind-core allow-msg recognizer_loop:utterance <client_id>
+hivemind-core allow-msg speak <client_id>
 ```
 
-Keep the access key. List clients with `hivemind-core list-clients`.
+The access key and password are `HIVEMIND_ACCESS_KEY` and `HIVEMIND_PASSWORD`. Use a long random password: the hub's password handshake can refuse one that is easy to guess (`WeakPasswordError` in the hub's log), and the bridge then sees only closed connections until its handshake retries run out.
 
-## Step 3: Get a Twitch chat token
-
-1. Create or pick a Twitch account for the bot.
-2. Generate a chat OAuth token at <https://twitchapps.com/tmi/> while logged in as that account. It looks like `oauth:abcd1234...`.
-3. Note the channel name whose chat the bot should join.
-
-## Step 4: Install the bridge
+## 5. Run it
 
 ```bash
-git clone https://github.com/JarbasHiveMind/HiveMind-twitch-bridge
-cd HiveMind-twitch-bridge
-pip install -r requirements.txt
+export TWITCH_BOT_LOGIN=mybot
+export TWITCH_ALLOWED_CHANNELS=mychannel
+export TWITCH_CLIENT_ID=... TWITCH_CLIENT_SECRET=... TWITCH_REFRESH_TOKEN=...
+export HIVEMIND_ACCESS_KEY=... HIVEMIND_PASSWORD=... HIVEMIND_HOST=ws://hub.local
+export BRIDGE_HEALTH_PORT=8080
+hivemind-twitch-bridge
 ```
 
-## Step 5: Configure and run
+The log shows, in order: the hub handshake (`== connected to HiveMind`), the token (`refreshed the Twitch access token`, `Twitch token valid for mybot`), the chat login (`== logged in to Twitch chat as mybot`) and one `== joined #channel` per channel. `curl localhost:8080/readyz` answers `ready` from then on.
 
-Edit the call to `connect_twitch_to_hivemind(...)` at the bottom of `twitch_bridge/__main__.py` with your `channel`, `oauth`, trigger `tags`, and HiveMind `host`/`port`/`key`. Then run:
+## 6. Check the round trip
 
-```bash
-python -m twitch_bridge
-```
+In one of the channels, write `@mybot what time is it`. The hub's logs show the `recognizer_loop:utterance`; the bot answers as a reply to your message, starting with `@you`.
 
-## Step 6: Talk to it
+## Troubleshooting
 
-In the channel's chat, include a trigger tag:
-
-```
-@bot what is the weather?
-```
-
-The bridge strips the tag, forwards the message to the hub, and posts the spoken answer back as `@user , <answer>`.
-
----
-[Home](../readme.md) · [Operator setup →](operator-setup.md)
+- **`/readyz` stays 503 and the log repeats "Twitch has not confirmed #name"**: the channel login is wrong, renamed or suspended (Twitch silently drops a JOIN to a channel that does not exist).
+- **Exit status 3, `token_rejected` in `/dev/termination-log`**: Twitch refused the token: the refresh token was revoked (password change, application disconnected), the token belongs to another account than `TWITCH_BOT_LOGIN`, or it lacks `chat:read`/`chat:edit`. Get a new consent (step 3).
+- **Exit status 4**: Twitch refused the client id or secret.
+- **Exit status 1 right away**: the hub is unreachable or refused the access key and password; the bridge gives up after `DEFAULT_HANDSHAKE_MAX_RETRIES` (10) handshake attempts.
+- **The bot is connected but never answers**: the message must mention `@mybot` (or reply to the bot); whispers are never answered; check `allow-msg` on the hub.
+- **"HiveMind refused this identity" after the hub was reinstalled**: the bridge pins the hub's Noise key; reset the pin (`hivemind-client reset-noise-pin`) or start with a fresh `/home/bridge/.config/hivemind`.

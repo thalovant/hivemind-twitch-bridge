@@ -1,3 +1,32 @@
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Thalovant fork section; layout and repo rules updated for the WebSocket client and token refresh.
+
+# This is the Thalovant fork
+
+The rules in this section win over anything below them, which is upstream's
+guidance kept for context:
+
+- Default branch is `main`. Branch from `main`, open a PR into `main`.
+- Commit under your own identity; the upstream identity rule does not apply.
+- Nothing here publishes to PyPI or to upstream's registry. CI
+  (`.github/workflows/ci.yml`) tests every PR and, on `main`, publishes a
+  signed image to `ghcr.io/thalovant/hivemind-twitch-bridge`.
+- Every change to the bridge's behaviour keeps a test that fails without it
+  and passes with it. A documentation or workflow change has no behaviour to
+  test: it is validated by the build, the lint selection and, for the
+  workflow, a CI run on the pull request.
+- Update QUICK_FACTS.md, FAQ.md, MAINTENANCE_REPORT.md, AUDIT.md and
+  SUGGESTIONS.md with every change.
+- Every Markdown file starts with a `Last Edit: <author> - <date> - Motive:
+  <summary>` line, and MAINTENANCE_REPORT.md entries are dated and carry a
+  transparency report for AI-assisted work. This is the Thalovant workspace
+  convention and replaces upstream's "timeless text, no dates" rule below for
+  this fork's documentation.
+- The settings, defaults and exit statuses in README.md and QUICK_FACTS.md
+  are what the platform relies on (the managed-bridge contract). Renaming a
+  variable or changing a default is a breaking change.
+
+---
+
 # AGENTS.md — `HiveMind-twitch-bridge`
 
 Guidance for AI coding agents (and humans) working in this repository. Read it
@@ -6,11 +35,12 @@ code and that, if ignored, produce work that will be rejected.
 
 ## Repo
 
-Bridges a Twitch channel's IRC chat to a HiveMind node: a HiveMind bridge is a
+Bridges a Twitch bot account's chat to a HiveMind node: a HiveMind bridge is a
 satellite whose input and output are a chat platform instead of a microphone.
-A chat message that carries a trigger tag (default `@bot`) becomes a
-`recognizer_loop:utterance` bus message; the hub's `speak` reply is echoed
-back into the channel addressed to the user who asked. Part of the
+A chat message in an allowed channel that mentions the bot (`@botlogin`) or
+replies to it becomes a `recognizer_loop:utterance` bus message, mention
+removed; the hub's `speak` reply goes back into the channel as a Twitch reply
+to that message, addressed to the user who asked. Part of the
 [HiveMind](https://github.com/JarbasHiveMind) ecosystem — a protocol for
 connecting satellite devices to a hub running
 [OpenVoiceOS](https://github.com/OpenVoiceOS). The hub is
@@ -24,17 +54,21 @@ before inventing a new pattern here.
 
 ## Layout / build / test
 
-- Package module: `twitch_bridge/`. Tests live in `tests/` (check before
-  adding — do not create a second test directory). `tests/e2e/` drives the
-  bridge against a real, in-process `hivemind-core` hub via `hivescope`
-  (loopback WebSocket) plus a live-Twitch smoke test gated on environment
-  variables; both need the `e2e` extra.
+- Package module: `twitch_bridge/` (`__init__.py` the bridge, `chat.py` the
+  Twitch WebSocket client, `auth.py` the token upkeep, `irc.py` line
+  parsing, `health.py`, `__main__.py` settings). Tests live in `tests/`
+  (check before adding — do not create a second test directory);
+  `tests/fake_twitch.py` holds the local Twitch chat (WebSocket) and token
+  (HTTP) servers every test uses. `tests/e2e/` drives the bridge against a
+  real, in-process `hivemind-core` hub via `hivescope` (loopback WebSocket)
+  and has opt-in checks against real Twitch chat (`TWITCH_LIVE=1`); it needs
+  the `e2e` extra.
 - Set up a throwaway environment inside your clone; never touch a shared venv:
   `python3 -m venv .venv && VIRTUAL_ENV=$PWD/.venv uv pip install -e ".[test]" --prerelease=allow`
-- Run the suite in the foreground: `python3 -m pytest tests/test_smoke.py -q`.
-  It mocks `HiveMessageBusClient`, so it runs without a live hub — that also
-  means it cannot catch a real handshake hang; treat it as a shape/wiring
-  check. For `tests/e2e/`, install the `e2e` extra and run
+- Run the suite in the foreground: `python3 -m pytest tests -q --ignore=tests/e2e`.
+  It replaces `HiveMessageBusClient` with `FakeHub`, so it cannot catch a
+  real handshake problem; Twitch chat and the token endpoints, though, are
+  real local servers. For `tests/e2e/`, install the `e2e` extra and run
   `python3 -m pytest tests/e2e -q`.
 - `uv`, never `pip`. If latest prereleases fail to install or resolve, that is
   a bug to FIX at the source, not to work around with a pin downgrade.
@@ -65,9 +99,7 @@ before inventing a new pattern here.
 
 - **Floor pins only** (`>=X.Y.Za1`), bumped when a feature or fix is actually
   needed — with a one-line comment saying why. No upper caps unless a specific
-  released version is genuinely broken (say which and why). `requirements.txt`
-  currently caps `hivemind-bus-client<2.0.0`; treat any change to that cap as a
-  deliberate decision, not something to drop casually.
+  released version is genuinely broken (say which and why).
 - **No lockfiles, ever.** Target the latest alphas (`--prerelease=allow`).
 - Everything in `pyproject.toml`/`requirements.txt` (deps, metadata, version).
   Never install from git — depend on a published PyPI alpha.
@@ -87,47 +119,45 @@ before inventing a new pattern here.
 
 ## Repo-specific rules
 
-- **Composition, not inheritance.** `JarbasTwitchBridge.__init__` either takes
-  an injected, already-connected `bus` or builds its own
-  `HiveMessageBusClient` and calls `connect()` exactly once, right there in
-  `__init__`. Never add a second `connect()` or `run_forever()` call — the
-  client already owns and runs its own reconnect worker thread once
-  `connect()` returns. When a `bus` is injected, this bridge must not connect
-  it; the caller owns that.
+- **Composition, not inheritance.** `HiveMindTwitchBridge.__init__` builds (or
+  accepts an injected) `HiveMessageBusClient` but does **not** connect it.
+  `run()` calls `connect_hivemind()` exactly once, which calls `connect()`
+  exactly once. Never add a second `connect()` or a `run_forever()` — the
+  client already owns its reconnect worker thread once `connect()` returns.
+- **The hub before Twitch.** `run()` connects the hub first and exits 1 if it
+  fails, before any Twitch token refresh: every refresh mints an access
+  token, and Twitch refuses a refresh token's 51st valid one. Keep that order.
 - **`connect()` must bound `handshake_max_retries`.** `hivemind-bus-client`'s
-  own default for `handshake_max_retries` is `None` (retry forever), which
-  hangs indefinitely against a stalled or unreachable hub. This repo already
-  guards against that with `DEFAULT_HANDSHAKE_MAX_RETRIES = 10` in
-  `twitch_bridge/__init__.py`, exposed as the `handshake_max_retries`
-  constructor/CLI parameter — keep that default finite in any refactor, and
-  keep the `hivemind-bus-client>=1.0.13a1` floor that carries the bounded
-  `handshake_max_retries` support.
+  own default is `None` (retry forever). `DEFAULT_HANDSHAKE_MAX_RETRIES = 10`
+  in `twitch_bridge/__init__.py` keeps it finite; keep the
+  `hivemind-bus-client>=1.0.16a1` floor.
 - **The hub owns ACL, not this bridge.** A freshly registered HiveMind client
   is denied every message type until an admin runs `hivemind-core allow-msg
   recognizer_loop:utterance <client_id>` (and usually `speak`). This bridge
-  has no way to grant itself permissions and must not try to work around a
-  denial locally — a silently dropped message on the hub side is the hub
-  doing its job, not a bug here.
-- **Rejected credentials must fail fast.** The bounded
-  `handshake_max_retries` is what turns "wrong access key/password" into a
-  clean failure instead of a bridge that spins forever looking connected. Do
-  not add retry/backoff logic on top of `connect()` that defeats this.
-- **Return upstream responses verbatim.** `handle_speak()` forwards
-  `message.data["utterance"]` to Twitch unmodified apart from the
-  `@user , ` prefix that addresses the reply; do not reformat, truncate, or
-  further decorate hub-authored text. The one exception is the fixed fallback
-  line on `hive.complete_intent_failure`, which is bridge-authored by design
-  because the hub sent no utterance to relay.
-- **No asyncio loop here.** Unlike bridges built on an async chat SDK, this
-  one runs the Twitch IRC listener on a plain background thread
-  (`ovos_utils.create_daemon(self.twitch.listen)`) and `speak()` is called
-  directly from the HiveMind bus's own callback thread straight into a
-  blocking socket `send()` on the Twitch connection — there is no event loop
-  to bridge across (no `asyncio.run_coroutine_threadsafe` needed). If a
-  future change introduces an async Twitch client, add that thread-bridging
-  explicitly; do not assume it exists.
-- **`Twitch.on_error` reconnects by recursion.** `Twitch.listen()` calls
-  itself again from inside its own `except` handler on any socket error
-  instead of returning and letting a caller retry; this grows the Python call
-  stack with every reconnect and never terminates on its own. Treat this as a
-  known standing defect, not a pattern to copy elsewhere in the bridge.
+  must not try to work around a denial locally.
+- **Refused credentials stop the process.** Twitch refusing the token
+  (`TokenRejected`) writes `token_rejected` to `/dev/termination-log` and
+  exits 3; a refused client id/secret (`ClientRejected`) exits 4; network
+  trouble and Twitch 5xx/429 are retried and never stop it. Do not retry a
+  `TokenRejected`, and do not turn a transient error into one.
+- **Threads.** Twitch chat runs on the asyncio loop `run()` starts. `speak`
+  and `hive.complete_intent_failure` arrive on the HiveMind bus thread and
+  must reach chat through `loop.call_soon_threadsafe` (`speak()`); never call
+  `TwitchChat` methods from another thread, never block the bus thread.
+- **Twitch's limits live in `SendLimiter`.** Every outgoing PRIVMSG goes
+  through the queue in `TwitchChat._send_next`; do not send around it. The
+  numbers in `twitch_bridge/chat.py` stay under Twitch's limits for an
+  account that is not a moderator.
+- **No line breaks on the wire.** Outgoing text goes through
+  `twitch_bridge.irc.split_message` / `clean_text`, and `format_line` refuses
+  CR, LF and NUL. Keep both: a line break in hub text would be a second IRC
+  command.
+- **Return upstream responses as sent.** `handle_speak()` passes
+  `message.data["utterance"]` on unchanged apart from the `@asker` prefix,
+  control characters turned into spaces and the 500-character split. The one
+  bridge-authored line is the fallback on `hive.complete_intent_failure`.
+- **Never log what people wrote, what the bridge answered, or a token.** Log
+  lengths, channel names and Twitch notice ids instead. The websockets logger
+  is pinned above debug (`_QUIET_WEBSOCKET_LOG`) because its debug frames
+  carry `PASS`; `tests/test_logs.py` runs a whole session at DEBUG and fails
+  on any leak.

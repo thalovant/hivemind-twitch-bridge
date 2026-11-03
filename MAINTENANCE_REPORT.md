@@ -11,7 +11,8 @@ Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Thalovant fork set up: WebSock
 3. `HiveMindTwitchBridge` replaces `JarbasTwitchBridge` and upstream's `twitch_bridge/twitch.py`: settings from the environment and `*_FILE` secrets, mention gating, per-person sessions, health endpoints, `token_rejected` and exit statuses, hub first with bounded retries, nothing sensitive logged; tests rewritten around local WebSocket and HTTP servers; e2e through a real hub.
 4. Dockerfile (uid 10001, `HOME=/home/bridge`, read-only root), `.dockerignore`, `docker-compose.yml`, `.github/workflows/ci.yml` (tests, lint, smoke, e2e, signed publish from `main`); upstream's release, publish and registry workflows and `examples/echobot.py` removed; version 0.1.0.
 5. Settings errors exit 2 consistently.
-6. This docs set (README, `docs/index.md`, `docs/setup.md`, QUICK_FACTS, FAQ, AUDIT, SUGGESTIONS, this report, AGENTS.md fork section); upstream's `docs/configuration.md`, `docs/examples.md` and `docs/operator-setup.md` described the removed CLI and were folded into `readme.md` and `docs/setup.md`.
+6. A token validation that fails for a network reason at start is tried again after `retry_cap` (5 min), not after an hour (`TwitchAuth._retry_validation_soon`; `tests/test_auth.py::test_a_validation_that_failed_at_start_is_tried_again_soon_not_in_an_hour` fails without it).
+7. This docs set (README, `docs/index.md`, `docs/setup.md`, QUICK_FACTS, FAQ, AUDIT, SUGGESTIONS, this report, AGENTS.md fork section); upstream's `docs/configuration.md`, `docs/examples.md` and `docs/operator-setup.md` described the removed CLI and were folded into `readme.md` and `docs/setup.md`.
 
 Repository: `main` created from upstream's `dev` (`dde4b89`) and made the default branch; the `dev` mirror deleted.
 
@@ -20,7 +21,7 @@ Repository: `main` created from upstream's `dev` (`dde4b89`) and made the defaul
 **Verification**
 
 - Upstream defects reproduced first with a local IRC server against `twitch_bridge/twitch.py` at `dde4b89`: colon truncation, a 1.76 CPU-s/2 s spin with no reconnect after the server closed, CRLF command injection, plaintext port 6667.
-- `python -m pytest tests -q --ignore=tests/e2e`: 115 passed on Python 3.12.12 and 3.14.8 (local venvs). `ruff check --isolated --select F,E9 .`: clean.
+- `python -m pytest tests -q --ignore=tests/e2e`: 116 passed on Python 3.12.12 and 3.14.8 (local venvs). `ruff check --isolated --select F,E9 .`: clean.
 - `python -m pytest tests/e2e/test_twitch_hivemind_e2e.py`: 2 passed through a real hivemind-core 5.3.10a1 hub (hivescope 0.8.8a1): the full round trip, and a wrong hub password exiting 1 before any Twitch request. Locally only, the machine's inotify watches were exhausted by another process, so watchdog was switched to its polling observer inside the throwaway e2e venv; nothing in the repository changed for it.
 - `TWITCH_LIVE=1 python -m pytest tests/e2e/test_twitch_live.py`: 2 passed against the real `wss://irc-ws.chat.twitch.tv:443` (anonymous login joined two channels in 0.5 s and stayed up through keepalive PINGs; a made-up token got `Login authentication failed` and `TokenRejected`), 1 skipped (needs a bot token).
 - Mutation check: 21 source mutations (rate limit, PONG, CAP request, CRLF guard, mention gating, sessions, readiness, RECONNECT, keepalive PING, refresh rules, rotation, scheduled refresh, reconnect on a new token, `token_rejected`, hub-first order, quiet websocket logger...), each made at least one test fail.

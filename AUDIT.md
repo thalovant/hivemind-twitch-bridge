@@ -2,7 +2,7 @@ Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: first audit of the Thalovant f
 
 # Audit: hivemind-twitch-bridge
 
-Evidence: `python -m pytest tests -q --ignore=tests/e2e` (115 passed, Python 3.12 and 3.14), `python -m pytest tests/e2e/test_twitch_hivemind_e2e.py` (2 passed through a real hivemind-core 5.3.10a1 hub), `TWITCH_LIVE=1 python -m pytest tests/e2e/test_twitch_live.py` (2 passed against real Twitch chat, 1 skipped: it needs a bot token), a mutation pass (21 source mutations, each failed a test), the image run in MAINTENANCE_REPORT.md, and reading the code at commit `b7e93063bf19` (line numbers below refer to it). Upstream findings were reproduced against upstream's `twitch_bridge/twitch.py` at `dde4b89` with a local IRC server.
+Evidence: `python -m pytest tests -q --ignore=tests/e2e` (116 passed, Python 3.12 and 3.14), `python -m pytest tests/e2e/test_twitch_hivemind_e2e.py` (2 passed through a real hivemind-core 5.3.10a1 hub), `TWITCH_LIVE=1 python -m pytest tests/e2e/test_twitch_live.py` (2 passed against real Twitch chat, 1 skipped: it needs a bot token), a mutation pass (21 source mutations, each failed a test), the image run in MAINTENANCE_REPORT.md, and reading the code at commit `21a8cd2b3aab` (line numbers below refer to it). Upstream findings were reproduced against upstream's `twitch_bridge/twitch.py` at `dde4b89` with a local IRC server.
 
 ## Fixed: upstream's IRC client could not hold a session
 
@@ -30,11 +30,11 @@ Evidence: `python -m pytest tests -q --ignore=tests/e2e` (115 passed, Python 3.1
 ## 3. Every start mints a new access token
 
 - **Where:** `TwitchAuth.start` (`twitch_bridge/auth.py:138`).
-- **Finding:** in refresh mode each start refreshes. Twitch allows at most 50 valid access tokens per refresh token and refuses the 51st. A container restarting more than 50 times within one access token's lifetime (about 4 h) would be refused. Mitigations in the code: the hub is connected first, so a hub outage exits before any refresh (`tests/test_bridge.py::test_a_hub_that_never_answers_exits_1_before_any_twitch_request`); an unrecognised 400 is retried, not treated as `token_rejected` (`auth.py:272`, `tests/test_auth.py::test_twitch_errors_and_unknown_answers_are_retried_not_fatal`).
+- **Finding:** in refresh mode each start refreshes. Twitch allows at most 50 valid access tokens per refresh token and refuses the 51st. A container restarting more than 50 times within one access token's lifetime (about 4 h) would be refused. Mitigations in the code: the hub is connected first, so a hub outage exits before any refresh (`tests/test_bridge.py::test_a_hub_that_never_answers_exits_1_before_any_twitch_request`); an unrecognised 400 is retried, not treated as `token_rejected` (`auth.py:277`, `tests/test_auth.py::test_twitch_errors_and_unknown_answers_are_retried_not_fatal`).
 
 ## 4. A rotated refresh token lives in memory only
 
-- **Where:** `TwitchAuth._refresh_once` (`twitch_bridge/auth.py:243`, log line `:256`).
+- **Where:** `TwitchAuth._refresh_once` (`twitch_bridge/auth.py:248`, log line `:261`).
 - **Finding:** by design nothing is written to disk. If Twitch ever invalidated the previous refresh token on rotation, the next restart would fail with `token_rejected`. For a confidential client the stored refresh token stays valid unless revoked, which is what the design relies on.
 
 ## 5. A refused login is retried once in refresh mode, never in static mode

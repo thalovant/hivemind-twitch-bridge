@@ -18,7 +18,7 @@ Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Thalovant fork: WebSocket chat
 | Noise key | `/home/bridge/.config/hivemind/unnamed-node_noise.key` (hivemind-bus-client default for an unnamed node) |
 | Default branch | `main` (upstream: `JarbasHiveMind/HiveMind-twitch-bridge`, branch `dev`) |
 | CI | `.github/workflows/ci.yml`: tests on Python 3.12 and 3.14, ruff `F,E9`, image smoke test, e2e through a real hub, publish on `main` |
-| Tests | `tests/`, 115 tests (`python -m pytest tests -q --ignore=tests/e2e`); `tests/e2e`, 5 tests (2 through a real hub, 3 opt-in against real Twitch) |
+| Tests | `tests/`, 116 tests (`python -m pytest tests -q --ignore=tests/e2e`); `tests/e2e`, 5 tests (2 through a real hub, 3 opt-in against real Twitch) |
 | HiveMind message types | sends `recognizer_loop:utterance`; handles `speak`, `hive.complete_intent_failure` |
 | License | Apache-2.0 |
 

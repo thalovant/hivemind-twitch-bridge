@@ -300,3 +300,34 @@ def test_channels_are_lowercased_and_deduplicated():
                                   client=FakeHub())
     assert bridge.channels == ("alpha", "beta")
     assert bridge.bot_login == "hivebot"
+
+
+def test_a_hub_refusal_before_the_loop_starts_still_stops_the_bridge():
+    hub = FakeHub()
+    with ThreadedFakeTwitch() as chat, FakeTwitchId() as ids:
+        bridge = make_bridge(chat, ids, hub)
+        connect = bridge.connect_hivemind
+
+        def connect_then_refused():
+            connect()  # the auth_rejected listener is registered now
+            hub.emitter.emit("auth_rejected", "invalid authorization")
+
+        bridge.connect_hivemind = connect_then_refused
+        assert Running(bridge).__enter__().wait() == EXIT_HUB_FAILED
+        assert ids.requests == [], "a token refresh was spent after the hub refused"
+        assert chat.fake.connections == 0
+
+
+def test_a_reply_id_of_another_type_from_the_hub_is_still_sent():
+    hub = FakeHub()
+    with ThreadedFakeTwitch(accept=accept_access_tokens) as chat, FakeTwitchId() as ids:
+        bridge = make_bridge(chat, ids, hub)
+        with Running(bridge):
+            chat.wait_for(bridge.ready, what="ready")
+            from ovos_bus_client.message import Message
+            context = {"twitch_channel": "alpha", "twitch_message_id": 777,
+                       "user": {"twitch_username": "alice"}}
+            hub.handlers["speak"](Message("speak", {"utterance": "one"}, context))
+            hub.handlers["speak"](Message("speak", {"utterance": "two"}, context))
+            chat.wait_for(lambda: len(chat.fake.privmsgs) == 2, what="both replies")
+            assert chat.fake.privmsgs[1][1] == "@reply-parent-msg-id=777 PRIVMSG #alpha :@alice two"

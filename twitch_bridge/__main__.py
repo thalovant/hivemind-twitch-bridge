@@ -197,6 +197,8 @@ def resolve_options(argv: Optional[Sequence[str]] = None,
         port = int(port) if port is not None else 5678
     except ValueError:
         parser.error("HIVEMIND_PORT must be a number")
+    if not 1 <= port <= 65535:
+        parser.error("HIVEMIND_PORT must be between 1 and 65535")
 
     self_signed = args.self_signed
     if self_signed is None:
@@ -214,6 +216,8 @@ def resolve_options(argv: Optional[Sequence[str]] = None,
         health_port = int(health_port) if health_port is not None else None
     except ValueError:
         parser.error("BRIDGE_HEALTH_PORT must be a number")
+    if health_port is not None and not 0 <= health_port <= 65535:
+        parser.error("BRIDGE_HEALTH_PORT must be between 0 and 65535")
 
     session_scope = pick("session_scope") or "person"
     if session_scope not in ("person", "chat"):

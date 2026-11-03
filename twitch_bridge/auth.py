@@ -287,6 +287,8 @@ class TwitchAuth:
             return
         if status == 200:
             self._accept_validation(_validation(body))
+        elif status == 401:
+            raise TokenRejected("Twitch says the access token it just issued is invalid")
         else:
             LOG.warning(f"validating the refreshed token answered HTTP {status}")
 

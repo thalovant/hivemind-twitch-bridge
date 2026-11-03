@@ -154,6 +154,10 @@ class HiveMindTwitchBridge:
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._stopping: Optional[asyncio.Event] = None
         self._exit_code = EXIT_OK
+        # a stop asked for (from another thread) before the loop exists, e.g.
+        # the hub refusing the bridge right after the handshake
+        self._loop_lock = threading.Lock()
+        self._pending_stop: Optional[int] = None
 
     # ------------------------------------------------------------------
     # lifecycle
@@ -191,8 +195,12 @@ class HiveMindTwitchBridge:
             self._shutdown()
 
     async def _run(self) -> int:
-        self._loop = asyncio.get_running_loop()
         self._stopping = asyncio.Event()
+        with self._loop_lock:
+            self._loop = asyncio.get_running_loop()
+            pending, self._pending_stop = self._pending_stop, None
+        if pending is not None:
+            self._request_stop(pending)
         for signum in (signal.SIGTERM, signal.SIGINT):
             try:
                 self._loop.add_signal_handler(signum, self._request_stop, EXIT_OK)
@@ -201,7 +209,8 @@ class HiveMindTwitchBridge:
         try:
             # a token first (a refresh can retry for a while), then chat and the
             # token's upkeep side by side; a stop request ends either stage
-            await self._until_stopped(self.auth.start())
+            if not self._stopping.is_set():
+                await self._until_stopped(self.auth.start())
             if not self._stopping.is_set():
                 await self._until_stopped(self._run_chat(), self.auth.run())
             return self._exit_code
@@ -248,8 +257,12 @@ class HiveMindTwitchBridge:
         self._request_stop_threadsafe(EXIT_OK)
 
     def _request_stop_threadsafe(self, code: int) -> None:
-        loop = self._loop
-        if loop is not None and not loop.is_closed():
+        with self._loop_lock:
+            loop = self._loop
+            if loop is None:
+                self._pending_stop = code  # _run acts on it once the loop exists
+                return
+        if not loop.is_closed():
             try:
                 loop.call_soon_threadsafe(self._request_stop, code)
             except RuntimeError:

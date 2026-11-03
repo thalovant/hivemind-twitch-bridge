@@ -15,6 +15,8 @@ from typing import Dict, List, Optional
 MAX_MESSAGE_LENGTH = 500
 #: A Twitch login (user or channel name): lowercase letters, digits, underscore.
 LOGIN_PATTERN = re.compile(r"[a-z0-9_]{1,25}")
+#: An IRCv3 message-tag key: optional client prefix "+", optional vendor, name.
+_TAG_KEY = re.compile(r"\+?(?:[A-Za-z0-9.-]+/)?[A-Za-z0-9-]+")
 
 _TAG_UNESCAPES = {":": ";", "s": " ", "\\": "\\", "r": "\r", "n": "\n"}
 _TAG_ESCAPES = {";": "\\:", " ": "\\s", "\\": "\\\\", "\r": "\\r", "\n": "\\n"}
@@ -123,6 +125,12 @@ def format_line(command: str, *params: str, tags: Optional[Dict[str, str]] = Non
     """
     parts = []
     if tags:
+        for key, value in tags.items():
+            if not isinstance(key, str) or not _TAG_KEY.fullmatch(key):
+                raise ValueError("an IRC tag key is letters, digits and hyphens "
+                                 "(with an optional vendor/ and +)")
+            if not isinstance(value, str):
+                raise ValueError("an IRC tag value must be text")
         parts.append("@" + ";".join(f"{key}={escape_tag_value(value)}"
                                     for key, value in tags.items()))
     for piece in (command, *params):

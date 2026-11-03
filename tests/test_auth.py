@@ -234,3 +234,11 @@ def test_a_validation_that_failed_at_start_is_tried_again_soon_not_in_an_hour():
 
         run(scenario(), timeout=5)
         assert len(server.validations()) == 2
+
+
+def test_a_freshly_issued_token_that_validate_refuses_is_token_rejected():
+    with FakeTwitchId() as server:
+        server.validate_answers.append((401, {"status": 401, "message": "invalid access token"}))
+        with pytest.raises(TokenRejected, match="just issued"):
+            run(refreshing(server).start())
+        assert len(server.posts()) == 1

@@ -98,3 +98,16 @@ def test_emoji_count_as_two_so_the_message_still_fits():
     assert all(chat_length(chunk) <= MAX_MESSAGE_LENGTH for chunk in chunks)
     assert "".join(chunks) == text
     assert len(chunks) == 2
+
+
+@pytest.mark.parametrize("key", ["reply\r\nPRIVMSG #x :spam", "two words", "a=b", "a;b", "", "\x00"])
+def test_a_tag_key_cannot_smuggle_anything(key):
+    with pytest.raises(ValueError):
+        format_line("PRIVMSG", "#chan", "hi", tags={key: "v"})
+
+
+def test_valid_tag_keys_and_a_non_text_value():
+    assert format_line("PRIVMSG", "#c", "hi", tags={"+example.com/x-y": "1"}).startswith(
+        "@+example.com/x-y=1 ")
+    with pytest.raises(ValueError):
+        format_line("PRIVMSG", "#c", "hi", tags={"reply-parent-msg-id": 123})

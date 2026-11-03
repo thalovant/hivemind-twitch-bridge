@@ -145,6 +145,10 @@ def test_a_partial_refresh_setup_names_what_is_missing(capsys):
     ("HIVEMIND_PORT", "abc"),
     ("BRIDGE_HEALTH_PORT", "x"),
     ("TWITCH_BOT_LOGIN", "not a login"),
+    ("BRIDGE_HEALTH_PORT", "65536"),
+    ("BRIDGE_HEALTH_PORT", "-1"),
+    ("HIVEMIND_PORT", "0"),
+    ("HIVEMIND_PORT", "70000"),
 ])
 def test_malformed_values_are_refused(variable, value):
     with pytest.raises(SystemExit) as stopped:

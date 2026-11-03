@@ -121,15 +121,21 @@ def test_not_ready_until_every_channel_is_joined_and_missing_joins_are_retried()
     run(scenario)
 
 
-def test_leaving_a_channel_makes_the_bridge_not_ready_and_it_joins_again():
+def test_leaving_a_channel_makes_the_bridge_not_ready_and_it_joins_again_at_once():
     async def scenario():
         async with FakeTwitch() as server:
-            chat = make_chat(server, join_retry=0.2)
+            # a long retry timer: the rejoin after a PART must not wait for it
+            chat = make_chat(server, join_retry=30.0)
             task = await started(chat)
             await until(chat.ready, what="ready")
+            server.silent_channels.add("beta")  # hold the rejoin's echo back
             await server.push(f":{LOGIN}!{LOGIN}@{LOGIN}.tmi.twitch.tv PART #beta")
-            await until(lambda: not chat.ready(), what="not ready after PART")
-            await until(chat.ready, what="joined again")
+            await until(lambda: server.lines(1).count("JOIN #beta") == 2, timeout=2,
+                        what="an immediate JOIN after the PART")
+            assert not chat.ready()
+            # Twitch's (late) echo of that JOIN
+            await server.push(f":{LOGIN}!{LOGIN}@{LOGIN}.tmi.twitch.tv JOIN #beta")
+            await until(chat.ready, timeout=2, what="ready again")
             assert server.lines(1).count("JOIN #beta") == 2
             await stop(chat, task)
     run(scenario)
@@ -451,5 +457,65 @@ def test_a_slow_mode_roomstate_is_respected_on_the_wire():
             chat.say("alpha", "two")
             await until(lambda: len(server.privmsgs) == 2, what="both")
             assert server.privmsgs[1][0] - server.privmsgs[0][0] >= 0.95
+            await stop(chat, task)
+    run(scenario)
+
+
+def test_nothing_is_delivered_from_a_channel_the_bot_is_not_in():
+    """Twitch does not guarantee order: a line can come before the JOIN is
+    confirmed or after the bot's own PART."""
+    async def scenario():
+        received = []
+        async with FakeTwitch(silent_channels={"beta"}) as server:
+            chat = make_chat(server, received=received, join_retry=30.0)
+            task = await started(chat)
+            await until(lambda: "alpha" in chat.joined, what="alpha joined")
+            await server.chat("beta", "bob", "@hivebot before the join")
+            server.silent_channels.add("alpha")  # alpha's rejoin will not be echoed
+            await server.push(f":{LOGIN}!{LOGIN}@{LOGIN}.tmi.twitch.tv PART #alpha")
+            await until(lambda: "alpha" not in chat.joined, what="alpha left")
+            await server.chat("alpha", "carol", "@hivebot after the part")
+            server.silent_channels.clear()
+            await server.push(f":{LOGIN}!{LOGIN}@{LOGIN}.tmi.twitch.tv JOIN #alpha")
+            await until(lambda: "alpha" in chat.joined, what="alpha back")
+            await server.chat("alpha", "dave", "@hivebot once joined")
+            await until(lambda: received, what="dave's message")
+            await asyncio.sleep(0.1)
+            assert [message.user_login for message in received] == ["dave"]
+            await stop(chat, task)
+    run(scenario)
+
+
+def test_a_reply_id_or_mention_of_another_type_cannot_stop_the_sender():
+    async def scenario():
+        async with FakeTwitch() as server:
+            chat = make_chat(server)
+            task = await started(chat)
+            await until(chat.ready, what="ready")
+            assert chat.say("alpha", "first", reply_to=12345, mention=678) == 1
+            assert chat.say("alpha", 42, mention=["alice"]) == 1
+            assert chat.say("alpha", "third", mention="alice") == 1
+            await until(lambda: len(server.privmsgs) == 3, what="all three")
+            assert [line for _, line in server.privmsgs] == [
+                "@reply-parent-msg-id=12345 PRIVMSG #alpha :first",
+                "PRIVMSG #alpha :42",
+                "PRIVMSG #alpha :@alice third"]
+            await stop(chat, task)
+    run(scenario)
+
+
+def test_the_sender_survives_an_item_it_cannot_send():
+    async def scenario():
+        async with FakeTwitch() as server:
+            chat = make_chat(server)
+            task = await started(chat)
+            await until(chat.ready, what="ready")
+            from twitch_bridge.chat import _Outgoing
+            # an item put on the queue directly, around say()'s checks
+            chat._pending.setdefault("alpha", __import__("collections").deque()).append(
+                _Outgoing("alpha", object(), None, time.monotonic()))
+            chat.say("alpha", "still sending")
+            await until(lambda: server.privmsgs, what="the next message")
+            assert [line for _, line in server.privmsgs] == ["PRIVMSG #alpha :still sending"]
             await stop(chat, task)
     run(scenario)

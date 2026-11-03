@@ -239,6 +239,7 @@ class TwitchChat:
         self._wake: Optional[asyncio.Event] = None
         self._send_lock: Optional[asyncio.Lock] = None
         self._joiner: Optional[asyncio.Task] = None
+        self._rejoin: Optional[asyncio.Event] = None
         self._reconnector: Optional[asyncio.Task] = None
 
     # ------------------------------------------------------------------
@@ -264,6 +265,7 @@ class TwitchChat:
         """Stay connected until :meth:`stop`. Raises ``TokenRejected``."""
         self._stop = asyncio.Event()
         self._wake = asyncio.Event()
+        self._rejoin = asyncio.Event()
         self._send_lock = asyncio.Lock()
         sender = asyncio.create_task(self._send_loop(), name="twitch-send")
         attempt = 0
@@ -425,6 +427,7 @@ class TwitchChat:
             if channel in self._joined:
                 self._joined.discard(channel)
                 LOG.warning(f"left #{channel}; joining it again")
+                self._rejoin.set()  # now, not after the next JOIN_RETRY
         elif command == "RECONNECT":
             LOG.info("Twitch asked for a reconnect")
             return True
@@ -460,7 +463,9 @@ class TwitchChat:
 
     def _deliver(self, message: IrcMessage) -> None:
         channel = message.channel
-        if channel not in self._channel_set:
+        # configured AND joined: Twitch does not guarantee order, so a line can
+        # arrive after the bot's own PART
+        if channel not in self._channel_set or channel not in self._joined:
             return
         sender = message.nick or message.tags.get("login", "").lower()
         if not sender or sender == self.login:
@@ -499,7 +504,11 @@ class TwitchChat:
                     continue
                 self.join_limiter.record(time.monotonic())
                 await self._send(format_line("JOIN", f"#{channel}", trailing=False))
-            await asyncio.sleep(self.join_retry)
+            self._rejoin.clear()
+            try:
+                await asyncio.wait_for(self._rejoin.wait(), self.join_retry)
+            except asyncio.TimeoutError:
+                pass
             still = [f"#{channel}" for channel in self.channels if channel not in self._joined]
             if still:
                 LOG.warning(f"Twitch has not confirmed {', '.join(still)}; joining again")
@@ -520,7 +529,13 @@ class TwitchChat:
         if channel not in self._channel_set:
             LOG.warning("not sending to a channel that is not configured")
             return 0
-        prefix = f"@{mention} " if mention and LOGIN_PATTERN.fullmatch(mention) else ""
+        # the hub echoes these back from the question's context; a skill can
+        # hand back other types, which must not reach the wire as they are
+        reply_to = str(reply_to) if reply_to not in (None, "") else None
+        if not (isinstance(mention, str) and LOGIN_PATTERN.fullmatch(mention)):
+            mention = None
+        prefix = f"@{mention} " if mention else ""
+        text = text if isinstance(text, str) else str(text)
         chunks = split_message(text, prefix=prefix)
         queue = self._pending.setdefault(channel, deque())
         now = time.monotonic()
@@ -539,7 +554,12 @@ class TwitchChat:
     async def _send_loop(self) -> None:
         while True:
             self._wake.clear()
-            delay = await self._send_next()
+            try:
+                delay = await self._send_next()
+            except Exception as error:  # the sender must outlive any one message
+                LOG.error(f"sending to Twitch chat failed ({type(error).__name__}); "
+                          f"trying again in 1 s")
+                delay = 1.0
             if delay == 0:
                 continue
             try:
@@ -570,8 +590,9 @@ class TwitchChat:
         tags = {"reply-parent-msg-id": item.reply_to} if item.reply_to else None
         try:
             line = format_line("PRIVMSG", f"#{channel}", item.text, tags=tags)
-        except ValueError:
+        except Exception:  # one unsendable answer must not hold up the queue
             self._pending[channel].popleft()
+            LOG.warning(f"dropped an answer for #{channel} that cannot be sent")
             return 0
         try:
             await self._send(line)

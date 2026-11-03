@@ -18,8 +18,10 @@ from twitch_bridge.irc import escape_tag_value, parse_line
 
 class FakeTwitch:
     def __init__(self, token: str = "good-token", *, silent_channels=(),
-                 answer_ping: bool = True, welcome: bool = True):
+                 answer_ping: bool = True, welcome: bool = True, accept=None):
         self.token = token
+        #: optional ``accept(password) -> bool`` replacing the single token
+        self.accept = accept
         self.silent_channels = set(silent_channels)
         self.answer_ping = answer_ping
         self.welcome = welcome
@@ -98,7 +100,9 @@ class FakeTwitch:
                     elif command == "NICK":
                         nick = message.params[0]
                         self._nick[number] = nick
-                        if password != f"oauth:{self.token}":
+                        accepted = (self.accept(password) if self.accept is not None
+                                    else password == f"oauth:{self.token}")
+                        if not accepted:
                             await websocket.send(
                                 ":tmi.twitch.tv NOTICE * :Login authentication failed\r\n")
                             await websocket.close()
@@ -228,3 +232,93 @@ class FakeTwitchId:
 
     def validations(self):
         return [header for method, _, _, header in self.requests if method == "GET"]
+
+
+class ThreadedFakeTwitch:
+    """``FakeTwitch`` on its own event loop thread, for code that runs ``asyncio.run`` itself."""
+
+    def __init__(self, **options):
+        import threading
+        self.fake = FakeTwitch(**options)
+        self.loop = asyncio.new_event_loop()
+        self._thread = threading.Thread(target=self.loop.run_forever, daemon=True)
+
+    def __enter__(self):
+        self._thread.start()
+        self.call(self.fake.__aenter__())
+        return self
+
+    def __exit__(self, *exc):
+        self.call(self.fake.__aexit__())
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        self._thread.join(5)
+
+    @property
+    def url(self):
+        return self.fake.url
+
+    def call(self, coroutine, timeout: float = 5.0):
+        return asyncio.run_coroutine_threadsafe(coroutine, self.loop).result(timeout)
+
+    def wait_for(self, predicate, timeout: float = 5.0, what: str = "condition"):
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if predicate():
+                return
+            time.sleep(0.01)
+        raise AssertionError(f"timed out waiting for {what}")
+
+
+class FakeHub:
+    """Stands in for ``HiveMessageBusClient``: records what the bridge emits and
+    answers from its own thread, as the real client's bus thread does."""
+
+    def __init__(self, fail_connect: Optional[Exception] = None):
+        import threading
+        self.handshake_event = threading.Event()
+        self.handlers = {}
+        self.listeners = {}
+        self.emitted = []
+        self.connect_kwargs = None
+        self.closed = False
+        self.fail_connect = fail_connect
+        hub = self
+
+        class Emitter:
+            def on(self, event, callback):
+                hub.listeners.setdefault(event, []).append(callback)
+
+            def emit(self, event, *args):
+                for callback in hub.listeners.get(event, []):
+                    callback(*args)
+
+        self.emitter = Emitter()
+
+    def connect(self, **kwargs):
+        self.connect_kwargs = kwargs
+        if self.fail_connect is not None:
+            raise self.fail_connect
+        self.handshake_event.set()
+
+    def on_mycroft(self, message_type, handler):
+        self.handlers[message_type] = handler
+
+    def emit(self, hive_message):
+        self.emitted.append(hive_message.payload)
+
+    def close(self):
+        self.closed = True
+        self.handshake_event.clear()
+
+    def utterances(self):
+        return [message for message in self.emitted
+                if message.msg_type == "recognizer_loop:utterance"]
+
+    def answer(self, question, text, message_type="speak"):
+        """Reply to ``question`` from another thread, keeping its context."""
+        import threading
+        from ovos_bus_client.message import Message
+        reply = Message(message_type, {"utterance": text} if text else {}, dict(question.context))
+        worker = threading.Thread(target=self.handlers[message_type], args=(reply,))
+        worker.start()
+        worker.join(5)

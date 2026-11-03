@@ -1,4 +1,4 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: How a refused client secret shows where the operator runs the bridge; the RSA identity beside the Noise key.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: A refused client id or secret writes token_rejected and exits 3, like a refused token (AUDIT section 12 fixed).
 
 # FAQ: hivemind-twitch-bridge
 
@@ -24,7 +24,7 @@ With `TWITCH_CLIENT_ID`, `TWITCH_CLIENT_SECRET` and `TWITCH_REFRESH_TOKEN`, `Twi
 
 ## What does `token_rejected` mean?
 
-Twitch refused the bot's credentials and no retry can fix it: `Login authentication failed` from chat (after one extra refresh when a refresh token is set), an invalid refresh grant, a token for another account than `TWITCH_BOT_LOGIN`, or a token without `chat:read` and `chat:edit`. The bridge writes `token_rejected` to `/dev/termination-log` and exits 3. A refused client id or secret exits 4 and writes nothing: the bot's consent is not the problem. Where the operator runs the bridge, it reports `TokenRejected` only from the termination message (hivemind-k8s-operator#121), so exit 4 shows as a bridge that stopped answering; AUDIT.md section 12 and SUGGESTIONS.md have the proposed fix.
+Twitch refused the bot's credentials and no retry can fix it: `Login authentication failed` from chat (after one extra refresh when a refresh token is set), an invalid refresh grant, a token for another account than `TWITCH_BOT_LOGIN`, or a token without `chat:read` and `chat:edit`. The bridge writes `token_rejected` to `/dev/termination-log` and exits 3. A refused client id or secret does the same (`token_rejected`, exit 3): the owner supplies them like the token, so they are credentials to replace too. The log line tells them apart ("Twitch refused the client id or secret" against "Twitch refused the bot's credentials"). Where the operator runs the bridge, it reports `TokenRejected` from the termination message (hivemind-k8s-operator#121) for both.
 
 ## Why does the bridge need only TCP 443?
 

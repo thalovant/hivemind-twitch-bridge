@@ -1,4 +1,4 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: RSA identity path; exit statuses, and what the operator reads from them.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: A refused client id or secret writes token_rejected and exits 3, like a refused token (AUDIT section 12 fixed).
 
 # Quick facts: hivemind-twitch-bridge
 
@@ -17,7 +17,7 @@ Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: RSA identity path; exit status
 | Image user | `bridge`, uid 10001, `HOME=/home/bridge`; writable: `/home/bridge/.config/hivemind`, `/tmp` |
 | Noise key | `/home/bridge/.config/hivemind/unnamed-node_noise.key` (hivemind-bus-client default for an unnamed node) |
 | RSA identity | `/home/bridge/.config/hivemind/unnamed-node.pem`; where the operator runs the bridge, both keys come read-only from its credentials Secret (hivemind-k8s-operator#122) |
-| Exit statuses | 3 Twitch refused the bot's token (`token_rejected` in `/dev/termination-log`), 4 Twitch refused the client id or secret (no termination message), 1 hub unreachable or refused; the operator reports `TokenRejected` from the message only (hivemind-k8s-operator#121) |
+| Exit statuses | 3 Twitch refused a credential, the bot's token or the client id or secret (`token_rejected` in `/dev/termination-log`), 1 hub unreachable or refused; the operator reports `TokenRejected` from the message only (hivemind-k8s-operator#121) |
 | Default branch | `main` (upstream: `JarbasHiveMind/HiveMind-twitch-bridge`, branch `dev`) |
 | CI | `.github/workflows/ci.yml`: tests on Python 3.12 and 3.14, ruff `F,E9`, image smoke test, e2e through a real hub, publish on `main` |
 | Tests | `tests/`, 170 tests (`python -m pytest tests -q --ignore=tests/e2e`); `tests/e2e`, 5 tests (2 through a real hub, 3 opt-in against real Twitch) |
@@ -69,5 +69,4 @@ Precedence: flag > variable > `<VARIABLE>_FILE`. A refresh token needs `TWITCH_C
 | `0` | stopped (SIGTERM, SIGINT) |
 | `1` | hub unreachable after 10 handshake attempts, or refused the bridge |
 | `2` | missing or malformed setting |
-| `3` | Twitch refused the bot's token; `token_rejected` written to `/dev/termination-log` |
-| `4` | Twitch refused the client id or secret |
+| `3` | Twitch refused a credential (the bot's token, or the client id or secret); `token_rejected` written to `/dev/termination-log` |

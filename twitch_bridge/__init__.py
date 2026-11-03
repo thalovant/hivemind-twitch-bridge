@@ -20,7 +20,10 @@ Connection lifecycle:
   arrives on the bus thread and is handed to that loop with
   ``call_soon_threadsafe``; it never blocks the bus thread.
 - A Twitch credential Twitch refuses ends the process: ``token_rejected`` is
-  written to ``/dev/termination-log`` and the exit status is 3.
+  written to ``/dev/termination-log`` and the exit status is 3. That covers
+  the bot's token and the application's client id and secret alike: to the
+  person running the bot, all three are credentials to replace. The log
+  line says which one Twitch refused.
 - a freshly registered HiveMind client is denied every message type until a
   hub admin runs ``hivemind-core allow-msg recognizer_loop:utterance
   <client_id>`` (and usually ``speak`` too); this bridge cannot do that step
@@ -72,8 +75,8 @@ TERMINATION_LOG = "/dev/termination-log"
 #: Exit statuses.
 EXIT_OK = 0
 EXIT_HUB_FAILED = 1
+#: Twitch refused a credential: the bot's token, or the client id or secret.
 EXIT_TOKEN_REJECTED = 3
-EXIT_CLIENT_REJECTED = 4
 
 
 class HiveMindTwitchBridge:
@@ -234,8 +237,12 @@ class HiveMindTwitchBridge:
             self._write_termination_message("token_rejected")
             return EXIT_TOKEN_REJECTED
         except ClientRejected as error:
+            # the application's credentials, not the bot's: a log line of its
+            # own, but the same termination reason, since the owner replaces
+            # the client id and secret as they do the token
             LOG.error(f"{error}. Not retrying.")
-            return EXIT_CLIENT_REJECTED
+            self._write_termination_message("token_rejected")
+            return EXIT_TOKEN_REJECTED
         finally:
             self.chat.stop()
 
@@ -486,5 +493,4 @@ def _channel_login(channel: str) -> str:
 
 __all__ = ["HiveMindTwitchBridge", "platform", "DEFAULT_HANDSHAKE_MAX_RETRIES",
            "LOOP_MAX_REPLIES", "LOOP_WINDOW",
-           "SESSION_SCOPES", "EXIT_OK", "EXIT_HUB_FAILED", "EXIT_TOKEN_REJECTED",
-           "EXIT_CLIENT_REJECTED"]
+           "SESSION_SCOPES", "EXIT_OK", "EXIT_HUB_FAILED", "EXIT_TOKEN_REJECTED"]

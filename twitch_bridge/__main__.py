@@ -103,12 +103,21 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+#: Exit status for a missing or malformed setting (argparse uses it too).
+EXIT_SETTINGS = 2
+
+
+def _settings_error(message: str) -> "SystemExit":
+    sys.stderr.write(f"hivemind-twitch-bridge: error: {message}\n")
+    return SystemExit(EXIT_SETTINGS)
+
+
 def _read_secret_file(path: str, variable: str) -> str:
     try:
         with open(path, encoding="utf-8") as handle:
             return handle.read().strip()
     except OSError as error:
-        raise SystemExit(f"{variable}: cannot read {path}: {error.strerror}") from None
+        raise _settings_error(f"{variable}: cannot read {path}: {error.strerror}") from None
 
 
 def _from_environment(option: str, environ: Mapping[str, str]) -> Optional[str]:
@@ -242,7 +251,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     try:
         bridge = HiveMindTwitchBridge(**options)
     except (ValueError, RuntimeError) as error:
-        raise SystemExit(f"hivemind-twitch-bridge: {error}") from None
+        # e.g. no HiveMind access key or host anywhere
+        raise _settings_error(str(error)) from None
     sys.exit(bridge.run())
 
 

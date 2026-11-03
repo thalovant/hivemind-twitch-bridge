@@ -147,13 +147,28 @@ def test_a_partial_refresh_setup_names_what_is_missing(capsys):
     ("TWITCH_BOT_LOGIN", "not a login"),
 ])
 def test_malformed_values_are_refused(variable, value):
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as stopped:
         resolve_options([], {**BASE, variable: value})
+    assert stopped.value.code == 2
 
 
-def test_an_unreadable_secret_file_is_named(tmp_path):
-    with pytest.raises(SystemExit, match="TWITCH_REFRESH_TOKEN_FILE"):
+def test_an_unreadable_secret_file_is_named_and_exits_2(tmp_path, capsys):
+    with pytest.raises(SystemExit) as stopped:
         resolve_options([], {**BASE, "TWITCH_REFRESH_TOKEN_FILE": str(tmp_path / "missing")})
+    assert stopped.value.code == 2
+    assert "TWITCH_REFRESH_TOKEN_FILE" in capsys.readouterr().err
+
+
+def test_no_hub_credentials_anywhere_exits_2(monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))  # no identity file
+    for name, value in BASE.items():
+        monkeypatch.setenv(name, value)
+    for name in ("HIVEMIND_ACCESS_KEY", "HIVEMIND_PASSWORD", "HIVEMIND_HOST"):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(SystemExit) as stopped:
+        main([])
+    assert stopped.value.code == 2
+    assert "key and password" in capsys.readouterr().err
 
 
 def test_every_secret_has_a_file_variant_and_the_names_are_the_contract():

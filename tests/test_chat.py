@@ -329,7 +329,8 @@ def test_a_long_reply_is_split_under_500_characters_in_order():
             texts = [parse_line(line).trailing for _, line in server.privmsgs]
             assert all(chat_length(text) <= MAX_MESSAGE_LENGTH for text in texts)
             assert texts[0].startswith("@alice w000")
-            assert " ".join(texts)[len("@alice "):].split(" ") == words
+            assert all(text.startswith("@alice ") for text in texts)
+            assert " ".join(text[len("@alice "):] for text in texts).split(" ") == words
             assert all(parse_line(line).tags == {"reply-parent-msg-id": "m-1"}
                        for _, line in server.privmsgs)
             await stop(chat, task)
@@ -519,3 +520,115 @@ def test_the_sender_survives_an_item_it_cannot_send():
             assert [line for _, line in server.privmsgs] == ["PRIVMSG #alpha :still sending"]
             await stop(chat, task)
     run(scenario)
+
+
+# ---------------------------------------------------------------------------
+# Twitch runs a chat message that starts with "/" or "." as a command
+# ---------------------------------------------------------------------------
+COMMANDS = ("/ban alice", ".timeout alice 600", "/me dances", ". ban", "/announce hi")
+
+
+@pytest.mark.parametrize("answer", COMMANDS)
+def test_an_answer_with_nobody_to_address_is_never_a_command(answer):
+    async def scenario():
+        async with FakeTwitch() as server:
+            chat = make_chat(server)
+            task = await started(chat)
+            await until(chat.ready, what="ready")
+            assert chat.say("alpha", answer) == 1
+            await until(lambda: server.privmsgs, what="the reply")
+            text = parse_line(server.privmsgs[0][1]).trailing
+            assert text == "\u200b" + answer
+            await stop(chat, task)
+    run(scenario)
+
+
+@pytest.mark.parametrize("mention", ["alice", None])
+def test_no_part_of_a_long_answer_starts_like_a_command(mention):
+    """A crafted answer can put ``/ban`` or ``.timeout`` exactly where a part begins."""
+    async def scenario():
+        async with FakeTwitch() as server:
+            chat = make_chat(server, limiter=SendLimiter(limit=20, window=1.0, channel_gap=0.0))
+            task = await started(chat)
+            await until(chat.ready, what="ready")
+            # every word is a command, so whatever a part starts with, it is one
+            answer = " ".join(["/ban", ".timeout"] * 120)
+            count = chat.say("alpha", answer, mention=mention)
+            assert count >= 2
+            await until(lambda: len(server.privmsgs) == count, what="every part")
+            texts = [parse_line(line).trailing for _, line in server.privmsgs]
+            assert all(chat_length(text) <= MAX_MESSAGE_LENGTH for text in texts)
+            assert not any(text.startswith(("/", ".")) for text in texts)
+            if mention:
+                assert all(text.startswith("@alice ") for text in texts)
+            await stop(chat, task)
+    run(scenario)
+
+
+def test_a_line_the_bridge_cannot_act_on_is_skipped_not_fatal():
+    """``"²".isdigit()`` is True and ``float("²")`` raises; a NUL makes the PONG
+    unsendable. Either used to end the chat task, and with it the process."""
+    async def scenario():
+        async with FakeTwitch() as server:
+            received = []
+            chat = make_chat(server, channels=("alpha",), received=received)
+            task = await started(chat)
+            await until(chat.ready, what="ready")
+            await server.push("@room-id=42;slow=² :tmi.twitch.tv ROOMSTATE #alpha",
+                              "PING :tmi\x00.twitch.tv")
+            await server.chat("alpha", "alice", "@hivebot still there?")
+            await until(lambda: received, what="the next message")
+            assert not task.done()
+            assert server.connections == 1
+            await stop(chat, task)
+    run(scenario)
+
+
+@pytest.mark.parametrize("reply_to", ["m\x001", "m 1", "m\r\n1", "x" * 200])
+def test_an_odd_reply_id_from_the_hub_still_sends_the_answer_without_it(reply_to):
+    async def scenario():
+        async with FakeTwitch() as server:
+            chat = make_chat(server)
+            task = await started(chat)
+            await until(chat.ready, what="ready")
+            assert chat.say("alpha", "it is noon", reply_to=reply_to, mention="alice") == 1
+            await until(lambda: server.privmsgs, what="the reply")
+            line = server.privmsgs[0][1]
+            assert line == "PRIVMSG #alpha :@alice it is noon"
+            assert "\x00" not in "".join(server.lines())
+            await stop(chat, task)
+    run(scenario)
+
+
+def test_reconnect_requests_right_after_each_login_back_off():
+    """The first RECONNECT is followed at once; one after every fresh login is
+    a reconnect storm, and gets the backoff."""
+    async def scenario():
+        async with FakeTwitch() as server:
+            chat = make_chat(server, channels=("alpha",), backoff_base=0.5, backoff_cap=4.0)
+            task = await started(chat)
+            gaps = []
+            for number in range(1, 5):
+                await until(lambda: server.connections == number and chat.ready(),
+                            what=f"login {number}")
+                began = time.monotonic()
+                await server.push(":tmi.twitch.tv RECONNECT")
+                await until(lambda: server.connections == number + 1, timeout=10,
+                            what=f"connection {number + 1}")
+                gaps.append(time.monotonic() - began)
+            assert gaps[0] < 0.25, gaps          # Twitch's own request: at once
+            assert min(gaps[1:]) >= 0.25, gaps   # then 0.5 * 2**n * [0.5, 1]
+            assert sum(gaps[1:]) >= 1.5, gaps
+            await stop(chat, task)
+    run(scenario, timeout=30)
+
+
+
+@pytest.mark.parametrize("slow, gap", [("30", 30.0), ("120", 120.0), ("121", 120.0),
+                                       ("9" * 400, 120.0), ("0", 0.0)])
+def test_slow_mode_is_read_up_to_twitchs_maximum(slow, gap):
+    """Twitch's slow mode is 3-120 s; a bigger value (or one that overflows to
+    inf) would hold every answer for that channel until it ages out."""
+    from twitch_bridge.chat import _seconds
+
+    assert _seconds(slow) == gap

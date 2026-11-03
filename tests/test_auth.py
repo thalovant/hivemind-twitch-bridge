@@ -242,3 +242,84 @@ def test_a_freshly_issued_token_that_validate_refuses_is_token_rejected():
         with pytest.raises(TokenRejected, match="just issued"):
             run(refreshing(server).start())
         assert len(server.posts()) == 1
+
+
+def _server(handler_class):
+    import http.server
+    import threading
+    server = http.server.HTTPServer(("127.0.0.1", 0), handler_class)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def test_a_redirect_never_carries_the_token_to_another_host():
+    """urllib follows a redirect and copies every header, Authorization included,
+    to whatever host the Location names."""
+    import http.server
+
+    seen = []
+
+    class Elsewhere(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append(self.headers.get("Authorization"))
+            body = b'{"login": "hivebot", "scopes": ["chat:read", "chat:edit"]}'
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        do_POST = do_GET
+
+        def log_message(self, *args):
+            pass
+
+    elsewhere = _server(Elsewhere)
+
+    class Redirecting(http.server.BaseHTTPRequestHandler):
+        def _redirect(self):
+            self.send_response(int(self.path.rsplit("/", 1)[-1]))
+            self.send_header("Location", f"http://localhost:{elsewhere.server_port}/steal")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        do_GET = do_POST = _redirect
+
+        def log_message(self, *args):
+            pass
+
+    redirecting = _server(Redirecting)
+    try:
+        for code in (301, 302, 303, 307, 308):
+            url = f"http://127.0.0.1:{redirecting.server_port}/validate/{code}"
+            status, _ = auth_module._http("GET", url, headers={"Authorization": "OAuth SECRET"})
+            assert status == code
+            status, _ = auth_module._http("POST", url, form={"client_secret": "SECRET"})
+            assert status == code
+        assert seen == []
+    finally:
+        redirecting.shutdown()
+        elsewhere.shutdown()
+
+
+def test_a_redirected_refresh_is_retried_not_fatal():
+    import http.server
+
+    class Redirecting(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.send_response(302)
+            self.send_header("Location", "http://localhost:9/token")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args):
+            pass
+
+    server = _server(Redirecting)
+    try:
+        auth = TwitchAuth("hivebot", client_id="cid", client_secret="secret",
+                          refresh_token="refresh-0",
+                          base_url=f"http://127.0.0.1:{server.server_port}/oauth2")
+        with pytest.raises(auth_module._Transient):
+            asyncio.run(auth._refresh_once())
+    finally:
+        server.shutdown()

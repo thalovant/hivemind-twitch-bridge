@@ -311,16 +311,31 @@ def _validation(body: dict) -> Validation:
                       expires_in=_int(body.get("expires_in")))
 
 
+class _NoRedirects(urllib.request.HTTPRedirectHandler):
+    """Hand a 3xx back as it is. urllib would follow it and copy every header,
+    ``Authorization: OAuth <token>`` included, to whatever host it names."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None  # urllib then raises HTTPError with the 3xx status
+
+
+#: The opener for every call to Twitch's id service: certificates verified
+#: (urllib's default HTTPS context), redirects never followed.
+_OPENER = urllib.request.build_opener(_NoRedirects)
+
+
 def _http(method: str, url: str, headers: Optional[dict] = None,
           form: Optional[dict] = None) -> Tuple[int, dict]:
     """One request; ``(status, json body or {})``. Raises ``_Transient`` for
-    network trouble and for answers worth retrying (5xx, 429)."""
+    network trouble and for answers worth retrying (5xx, 429). A redirect is
+    not followed: its 3xx status comes back like any other, and is retried
+    by the caller as an unexpected answer."""
     data = urllib.parse.urlencode(form).encode("ascii") if form is not None else None
     request = urllib.request.Request(url, data=data, method=method, headers=dict(headers or {}))
     if data is not None:
         request.add_header("Content-Type", "application/x-www-form-urlencoded")
     try:
-        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT) as answer:
+        with _OPENER.open(request, timeout=HTTP_TIMEOUT) as answer:
             status, raw = answer.status, answer.read()
     except urllib.error.HTTPError as error:
         status, raw = error.code, error.read()

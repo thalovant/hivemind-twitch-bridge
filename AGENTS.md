@@ -1,4 +1,4 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Thalovant fork section; layout and repo rules updated for the WebSocket client and token refresh.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Independent review: repo rules for command-safe replies, bounded reply chains, and text-free exception logs.
 
 # This is the Thalovant fork
 
@@ -152,8 +152,19 @@ before inventing a new pattern here.
   `twitch_bridge.irc.split_message` / `clean_text`, and `format_line` refuses
   CR, LF and NUL. Keep both: a line break in hub text would be a second IRC
   command.
+- **No part of a reply may start with `/` or `.`.** Twitch runs those as
+  commands. `TwitchChat.say` starts every part with `@asker ` and guards the
+  no-asker case with `irc.defuse_command`; keep every PRIVMSG going through
+  `say`.
+- **Bound bot-to-bot chains.** `HiveMindTwitchBridge._chain_allows` caps the
+  replies to the bot answered per account; do not answer a reply around it.
+- **Exceptions on text paths log their type only.** Never `LOG.exception` or
+  `str(error)` where the exception can quote a message, and never schedule a
+  callback that takes text with `call_soon_threadsafe` unless it catches its
+  own errors (asyncio logs a failed callback with its arguments).
 - **Return upstream responses as sent.** `handle_speak()` passes
-  `message.data["utterance"]` on unchanged apart from the `@asker` prefix,
+  `message.data["utterance"]` on unchanged apart from the `@asker` prefix on
+  every part (or the invisible command guard),
   control characters turned into spaces and the 500-character split. The one
   bridge-authored line is the fallback on `hive.complete_intent_failure`.
 - **Never log what people wrote, what the bridge answered, or a token.** Log

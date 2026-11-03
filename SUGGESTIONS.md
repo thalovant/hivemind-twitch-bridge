@@ -1,4 +1,4 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: proposals after the Thalovant fork set-up.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Independent review: ignore list for known bots, a termination reason for a refused client secret.
 
 # Suggestions: hivemind-twitch-bridge
 
@@ -49,3 +49,16 @@ Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: proposals after the Thalovant 
 - **Problem:** AUDIT.md section 11; the `e2e` CI job does not gate publishing.
 - **Proposal:** pin the base image by digest and build from a constraints file generated in CI (Renovate updates both); once the e2e job has proven stable, add it to the `image` job's `needs`.
 - **Impact:** medium; makes a rollback mean something and keeps hub interop from regressing silently.
+
+## An ignore list for known bots
+
+- **Problem:** AUDIT.md section 14: a bot that answers with plain `@mentions` is not caught by the reply-chain bound, and Twitch has no bot flag.
+- **Proposal:** `TWITCH_IGNORED_USERS` (logins, comma or space separated), set by the operator from a platform list (Nightbot, StreamElements, Streamlabs, Moobot, Fossabot, other bridges' bot accounts) plus the customer's own.
+- **Impact:** low to medium; one setting and a check in `handle_chat_message`.
+
+## A termination reason for a refused client secret
+
+- **Problem:** AUDIT.md section 12: exit status 4 writes nothing to `/dev/termination-log`.
+- **Proposal:** write `client_rejected` once the operator maps it (or reuse `token_rejected` if the platform treats both as "credentials need fixing").
+- **Impact:** low; clearer status in the console.
+

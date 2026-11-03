@@ -1,6 +1,46 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: review round on pull request #1: eleven findings fixed.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: CodeRabbit on PR #2: five comments applied (reconnect row, no-asker readme line, exact guard test, forwarded-only chain count, slow-mode cap).
 
 # Maintenance report: hivemind-twitch-bridge
+
+
+## 2026-11-03: CodeRabbit on pull request #2
+
+- `PRRT_kwDOVg5F8c6zHPUS` QUICK_FACTS Reconnect row: the first planned reconnect after a short session stays immediate; later ones in a row back off.
+- `PRRT_kwDOVg5F8c6zHPU3` readme: with no asker, only a part starting with `/` or `.` gets the invisible guard.
+- `PRRT_kwDOVg5F8c6zHPVC` `test_an_answer_with_nobody_to_address_is_never_a_command` asserts the exact text, `"\u200b" + answer`.
+- `PRRT_kwDOVg5F8c6zHPVP` `handle_chat_message` counts a reply to the bot only after `forward_to_hivemind` succeeded (`_record_reply`; `forward_to_hivemind` returns whether `emit` took it). Test: `tests/test_mentions.py::test_a_reply_that_never_reached_the_hub_does_not_count_toward_the_chain` (hub down, `emit` raising).
+- `PRRT_kwDOVg5F8c6zHPVb` `_seconds` caps slow mode at 120 s (`MAX_SLOW_SECONDS`). Test: `tests/test_chat.py::test_slow_mode_is_read_up_to_twitchs_maximum`.
+- **Verification:** the two code tests failed before their change (4 cases); `python -m pytest tests -q --ignore=tests/e2e` (ovos-config's file watcher off: no inotify watches left on this host): 167 passed; ruff clean.
+- **Transparency report:** AI model Claude Opus 5.5 (`claude-opus-5-5`) in Claude Code; applied the automated review's five comments, code ones with tests; no human review yet.
+
+## 2026-11-03: independent review of main
+
+**Why:** `main` at `b400a990` had a CodeRabbit pass (eleven fixes, entry below) but no independent review. This one looked for the failure classes found in the Matrix and Mattermost forks the same night: hub-outage and emit errors, malformed input crash-loops, replies run as commands or pinging, bot loops, redirects and TLS in the token calls, secret leaks, queue bounds, reconnect storms and readiness. AUDIT.md has the findings (T1-T6) with lines and tests, and the open items (sections 12-17).
+
+**Changes** (branch `fix/review-2026-11-03`, one commit each, oldest first)
+
+1. No reply part can start with `/` or `.`, which Twitch runs as a command: every part starts with `@<asker> `, and with no asker a part starting so gets an invisible U+200B (`irc.defuse_command`).
+2. Two bots answering each other's replies stop after 8 in 10 minutes per account and channel (`_chain_allows`, `LOOP_MAX_REPLIES`, `LOOP_WINDOW`).
+3. The id-service calls never follow a redirect (`auth._NoRedirects`); urllib copied `Authorization: OAuth <token>` to the redirect's host.
+4. A chat line whose handling raises is skipped, not fatal (`slow=²`, NUL in a PING); slow mode read from ASCII digits only; odd reply ids from the hub dropped; NUL refused in tag values.
+5. The two catch-alls that could log text (`_deliver`, the `say` callback) log the exception type only.
+6. A planned reconnect right after a login backs off instead of looping.
+7. Docs: AUDIT (review table, sections 12-17), this entry, QUICK_FACTS, FAQ, readme, AGENTS, SUGGESTIONS.
+
+**Verification**
+
+- Each new test failed before its fix (for T5: both leaks shown in the captured log; for T6: four reconnects ~10 ms apart).
+- Fuzz run of `parse_line` and `TwitchChat._handle` with 20 000 random and seeded lines: only the two T4 server lines raised.
+- `python -m pytest tests -q --ignore=tests/e2e`: 160 passed (Python 3.12, local; 133 before).
+- `ruff check --isolated --select F,E9 .`: clean.
+- `python -m pytest tests/e2e -q` (the `e2e` extra; ovos-config's file watcher turned off, as this host has no inotify watches left): 2 passed through a real hivemind-core hub, 3 skipped (opt-in live Twitch).
+- Not run locally: the image smoke steps, and a live Twitch check of the U+200B guard (AUDIT section 13).
+
+**Transparency report**
+
+- **AI model:** Claude Opus 5.5 (`claude-opus-5-5`), in Claude Code.
+- **Actions taken:** reviewed the chat client, IRC parser, token handling, bridge and CLI; fuzzed the parser and line handler; reproduced the urllib redirect header leak; wrote the failing tests, the fixes and these documents.
+- **Oversight:** requested by the session lead as an independent review; the branch is left for a human to push, review and merge.
 
 ## 2026-11-03: review round on pull request #1
 

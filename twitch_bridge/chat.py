@@ -33,9 +33,12 @@ from websockets.exceptions import ConnectionClosed, WebSocketException
 
 from twitch_bridge.errors import TokenRejected
 from twitch_bridge.irc import (
+    COMMAND_GUARD,
     LOGIN_PATTERN,
+    MAX_MESSAGE_LENGTH,
     IrcMessage,
     chat_length,
+    defuse_command,
     format_line,
     parse_line,
     split_message,
@@ -176,6 +179,41 @@ class SendLimiter:
         self._paused_until[channel] = max(self._paused_until.get(channel, 0.0), now + seconds)
 
 
+#: Longest reply id passed on to Twitch (its ids are 36-character UUIDs).
+MAX_MESSAGE_ID = 64
+#: Longest slow-mode wait Twitch sets, in seconds (it takes 3 to 120).
+MAX_SLOW_SECONDS = 120.0
+
+
+def _seconds(value: Optional[str]) -> Optional[float]:
+    """A tag holding whole seconds (``slow=30``); None when it is not one.
+
+    ``str.isdigit`` alone is not enough: ``"²".isdigit()`` is True, and
+    ``float("²")`` raises. The value is capped at ``MAX_SLOW_SECONDS``: a
+    bigger one (or a long one that overflows to inf) would hold every answer
+    for the channel until it ages out.
+    """
+    if not value or not (value.isascii() and value.isdigit()):
+        return None
+    return min(float(value), MAX_SLOW_SECONDS)
+
+
+def _message_id(value) -> Optional[str]:
+    """A reply id fit for the ``reply-parent-msg-id`` tag, or None.
+
+    The hub hands back what the question's context held, or whatever a skill
+    put there. An id with a space or a control character is no Twitch id;
+    without it the answer is still sent, just not as a threaded reply.
+    """
+    if value is None:
+        return None
+    value = str(value)
+    if (not value or len(value) > MAX_MESSAGE_ID
+            or any(char.isspace() or ord(char) < 32 or ord(char) == 127 for char in value)):
+        return None
+    return value
+
+
 class _ConnectionLost(Exception):
     """The session ended for a reason a reconnect can fix."""
 
@@ -269,6 +307,9 @@ class TwitchChat:
         self._send_lock = asyncio.Lock()
         sender = asyncio.create_task(self._send_loop(), name="twitch-send")
         attempt = 0
+        # planned reconnects in a row, each after a session shorter than
+        # STABLE_AFTER: the first is immediate, the next ones back off
+        planned = 0
         try:
             while not self._stop.is_set():
                 self._planned_reconnect = False
@@ -287,7 +328,14 @@ class TwitchChat:
                 if self._stop.is_set():
                     break
                 if self._planned_reconnect:
-                    attempt, delay = 0, 0.0
+                    if stable:
+                        planned = 0
+                    delay = 0.0 if planned == 0 else self._backoff(planned - 1)
+                    planned += 1
+                    attempt = 0
+                    if delay:
+                        LOG.info(f"Twitch asked for another reconnect right after a login; "
+                                 f"reconnecting in {delay:.1f} s")
                 else:
                     if stable:
                         attempt = 0
@@ -380,7 +428,21 @@ class TwitchChat:
                 # one frame can carry several lines
                 for line in frame.split("\n"):
                     message = parse_line(line)
-                    if message is not None and await self._handle(message):
+                    if message is None:
+                        continue
+                    try:
+                        reconnect = await self._handle(message)
+                    except (TokenRejected, ConnectionClosed, WebSocketException, OSError,
+                            _ConnectionLost):
+                        raise
+                    except Exception as error:
+                        # one line the bridge cannot act on must not end the
+                        # session, let alone the process; the command, never
+                        # the line (a line can carry what someone wrote)
+                        LOG.warning(f"ignored a Twitch {message.command[:16]} line that "
+                                    f"could not be handled ({type(error).__name__})")
+                        continue
+                    if reconnect:
                         self._planned_reconnect = True
                         return
 
@@ -419,9 +481,9 @@ class TwitchChat:
         elif command == "ROOMSTATE":
             channel = message.channel
             self._mark_joined(channel)
-            slow = message.tags.get("slow")
-            if channel and slow is not None and slow.isdigit():
-                self.limiter.set_slow_mode(channel, float(slow))
+            slow = _seconds(message.tags.get("slow"))
+            if channel and slow is not None:
+                self.limiter.set_slow_mode(channel, slow)
         elif command == "PART" and message.nick == self.login:
             channel = message.channel
             if channel in self._joined:
@@ -484,8 +546,10 @@ class TwitchChat:
         )
         try:
             self._on_message(chat_message)
-        except Exception:  # one bad message must not end the session
-            LOG.exception("the chat message handler failed")
+        except Exception as error:  # one bad message must not end the session
+            # the type only: a traceback carries the exception's text, which
+            # can quote the message
+            LOG.error(f"the chat message handler failed ({type(error).__name__})")
 
     async def _join_loop(self) -> None:
         try:
@@ -522,8 +586,10 @@ class TwitchChat:
 
         Call on the event loop. ``reply_to`` is the id of the message being
         answered (sent as ``reply-parent-msg-id``, so Twitch shows a reply);
-        ``mention`` is the login to address, ``@login`` starting the first
-        message.
+        ``mention`` is the login to address, ``@login`` starting every
+        message. No message can start with ``/`` or ``.``, which Twitch would
+        run as a command: with no one to address, such a message starts with
+        an invisible ``COMMAND_GUARD``.
         """
         channel = (channel or "").lower().lstrip("#")
         if channel not in self._channel_set:
@@ -531,12 +597,17 @@ class TwitchChat:
             return 0
         # the hub echoes these back from the question's context; a skill can
         # hand back other types, which must not reach the wire as they are
-        reply_to = str(reply_to) if reply_to not in (None, "") else None
+        reply_to = _message_id(reply_to)
         if not (isinstance(mention, str) and LOGIN_PATTERN.fullmatch(mention)):
             mention = None
-        prefix = f"@{mention} " if mention else ""
         text = text if isinstance(text, str) else str(text)
-        chunks = split_message(text, prefix=prefix)
+        if mention:
+            # every part addresses the person, so no part can start with "/"
+            # or "." and run as a Twitch command
+            chunks = split_message(text, prefix=f"@{mention} ", repeat_prefix=True)
+        else:
+            chunks = [defuse_command(chunk) for chunk in
+                      split_message(text, limit=MAX_MESSAGE_LENGTH - len(COMMAND_GUARD))]
         queue = self._pending.setdefault(channel, deque())
         now = time.monotonic()
         queued = 0

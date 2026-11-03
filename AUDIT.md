@@ -1,4 +1,4 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: review findings fixed (hub refusal race, port ranges, fresh-token 401, PART rejoin, joined-only delivery, sender robustness, tag keys, secrets in the build context and the docs); line references moved to b50c55945e3e.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Independent review of main (b400a990): T1-T6 fixed; CodeRabbit follow-ups on PR #2 (chain counts forwarded replies only, slow mode capped).
 
 # Audit: hivemind-twitch-bridge
 
@@ -82,3 +82,50 @@ Evidence: `python -m pytest tests -q --ignore=tests/e2e` (133 passed, Python 3.1
 
 - **Where:** `requirements.txt:1` (`hivemind-bus-client>=1.0.16a1`), `Dockerfile:1` (`FROM python:3.14-slim`).
 - **Finding:** each image build can resolve a different alpha and a different base; builds are not reproducible.
+
+## Independent review 2026-11-03 (fixed on `fix/review-2026-11-03`)
+
+Evidence: an adversarial read of `main` at `b400a990` (treated as unreviewed although it had a CodeRabbit pass), a fuzz run of `parse_line` and `TwitchChat._handle` (20 000 random and seeded lines), a two-server reproduction of the token redirect, one failing test written per finding before its fix, then `python -m pytest tests -q --ignore=tests/e2e` 160 passed (133 before; Python 3.12) and `ruff check --isolated --select F,E9 .` clean. Line numbers refer to `499334abe3bd`.
+
+| # | Severity | Where | Finding | Fix and test |
+| --- | --- | --- | --- | --- |
+| T1 | Medium | `TwitchChat.say` (`twitch_bridge/chat.py:579`, `:603`, `:605`), `irc.defuse_command` (`twitch_bridge/irc.py:173`) | Twitch runs a chat message whose first character is `/` or `.` as a command (`/me`; `/ban`, `.timeout` and the like where they are still taken). Only the first part of a reply started with `@<asker> `: later parts of a long reply started with whatever word fell at the cut, and a reply with no asker (a `speak` whose context lost the user) went out as it came. | Every part starts with `@<asker> ` (`split_message(..., repeat_prefix=True)`, `irc.py:180`); with no asker, a part starting with `/` or `.` gets `COMMAND_GUARD` U+200B (`irc.py:23`). `tests/test_chat.py::test_an_answer_with_nobody_to_address_is_never_a_command`, `::test_no_part_of_a_long_answer_starts_like_a_command`, `tests/test_irc.py::test_defuse_command_guards_only_a_leading_slash_or_dot` |
+| T2 | Medium | `handle_chat_message` (`twitch_bridge/__init__.py:329`, `:336`), `_chain_allows` (`:343`) | A reply to the bot is answered, and the bot's answers are Twitch replies addressed to the asker. Two bots doing that (a second HiveMind bridge in the channel, or any bot with `TWITCH_REQUIRE_MENTION=false`) answered each other until a hub quota ran out. Twitch has no bot flag to filter on. | At most `LOOP_MAX_REPLIES = 8` (`:65`) replies to the bot per account and channel in `LOOP_WINDOW = 600` s; logged once (login only); bounded memory. `tests/test_mentions.py::test_two_bots_answering_each_others_replies_stop_after_a_bounded_chain`, `::test_the_reply_chain_memory_is_bounded` |
+| T3 | Low | `auth._http` (`twitch_bridge/auth.py:327`) | `urllib.request.urlopen` follows a redirect and copies every header to the new location: `Authorization: OAuth <access token>` went to whatever host a redirect from the id service named (reproduced with two local servers). Needs Twitch or a TLS interception point to redirect; the token must not depend on it. | One opener that never follows a redirect (`_NoRedirects`, `:314`; `_OPENER`, `:324`); the 3xx is retried as an unexpected answer. `tests/test_auth.py::test_a_redirect_never_carries_the_token_to_another_host` (301-308, GET and POST), `::test_a_redirected_refresh_is_retried_not_fatal` |
+| T4 | Low | `TwitchChat._session` (`chat.py:394`, `:430`), `_seconds` (`:186`), `_message_id` (`:197`), `format_line` (`irc.py:141`) | Any exception from handling one line ended `chat.run()` and the process: `ROOMSTATE` with `slow=²` (`"²".isdigit()` is True, `float("²")` raises) or a `PING` whose text holds a NUL (found by the fuzz run). Both come from the server, not from chat users. A NUL in a reply id from the hub reached the wire unescaped. | Each line handled on its own, failures logged by command and exception type; slow mode read only from ASCII digits; odd reply ids dropped (the answer is still sent); NUL refused in tag values. `tests/test_chat.py::test_a_line_the_bridge_cannot_act_on_is_skipped_not_fatal`, `::test_an_odd_reply_id_from_the_hub_still_sends_the_answer_without_it`, `tests/test_irc.py::test_a_tag_value_cannot_carry_a_nul` |
+| T5 | Low | `TwitchChat._deliver` (`chat.py:522`, `:545`), `HiveMindTwitchBridge.speak`/`_say` (`__init__.py:437`, `:451`) | Two catch-alls would log text: `LOG.exception` prints the exception's text (which can quote the message), and asyncio logs a raising `call_soon_threadsafe` callback with its arguments (the answer). Nothing raises there today. | Exception type only on both paths. `tests/test_logs.py::test_a_failure_while_handling_text_never_puts_the_text_in_a_log` (both leaks reproduced before) |
+| T6 | Low | `TwitchChat.run` (`chat.py:298`, `:308`, `:329`) | Every planned reconnect (`RECONNECT`, a new token) was immediate and reset the backoff: a server sending `RECONNECT` after each login got a reconnect-and-login every ~10 ms. | The first is immediate; another after a session shorter than `STABLE_AFTER` waits the normal backoff, growing. `tests/test_chat.py::test_reconnect_requests_right_after_each_login_back_off` |
+
+CodeRabbit follow-ups on PR #2: T2 now counts a reply only once it reached the hub (`_record_reply`; a reply dropped while the hub is down, or refused by `emit`, used to count and could block that account for up to 600 s), test `tests/test_mentions.py::test_a_reply_that_never_reached_the_hub_does_not_count_toward_the_chain`; T4's slow-mode value is capped at Twitch's 120 s (`MAX_SLOW_SECONDS`), as a longer digit string, or one that overflows to inf, held the channel's answers until they aged out, test `tests/test_chat.py::test_slow_mode_is_read_up_to_twitchs_maximum`; the T1 no-asker test now pins the exact guarded text.
+
+Checked and fine: the hub outage path (`hub_live` before forwarding, `forward_to_hivemind` catches what `emit` raises and logs the type only); `parse_line` never raised in the fuzz run (malformed tags, missing params, lone backslashes, empty commands); CR/LF/NUL cannot reach the wire from reply text or mentions; whispers are never forwarded; the bot's own lines and other channels are dropped; Twitch messages are at most 500 characters, so inbound size needs no cap; the outgoing queue is bounded (`MAX_PENDING` per configured channel, `MAX_AGE`); the limiter keeps to 18 per 30 s and 1.1 s per channel; TLS is verified for chat (`wss://`) and the id service (urllib's default context), and neither endpoint can be set from the environment; the refresh token and client secret travel only in the POST body and appear in no log line, exception text, argv default or termination message (only `token_rejected`); `/readyz` needs the live hub session and every channel joined; session ids are `twitch-<channel>-<user id>`.
+
+## 12. A refused client id or secret writes no termination message
+
+- **Where:** `HiveMindTwitchBridge._run` (`twitch_bridge/__init__.py`, `except ClientRejected`).
+- **Finding:** exit status 4 and nothing in `/dev/termination-log`, by design (the bot's consent is not the problem; FAQ.md). The operator can only tell it from the exit status, and the other bridges' contract names `token_rejected` alone. If the platform owns the Twitch application, it has to map exit 4 itself.
+
+## 13. The command guard is not checked against live Twitch
+
+- **Where:** `COMMAND_GUARD` (`twitch_bridge/irc.py:23`).
+- **Finding:** the no-asker case relies on Twitch looking at the first character after trimming whitespace, which U+200B is not. Replies with an asker (nearly all) start with a visible `@login`, which needs no such assumption. `TWITCH_LIVE=1` runs could add a check with a bot token.
+
+## 14. A bot that answers with plain mentions is bounded only by the hub
+
+- **Where:** `_chain_allows` (`twitch_bridge/__init__.py:343`).
+- **Finding:** T2 counts replies to the bot. A bot that answers with a plain `@hivebot ...` message, not a Twitch reply, is not counted; only the hub's per-person limit slows such a loop. A configurable ignore list of accounts (SUGGESTIONS.md) would cover it.
+
+## 15. Replies queued at shutdown are dropped
+
+- **Where:** `_until_stopped` / `TwitchChat.stop`.
+- **Finding:** SIGTERM stops chat at once; answers still in the queue are not sent. Bounded by `MAX_PENDING` and usually empty.
+
+## 16. A token refresh is not rate limited by the bridge
+
+- **Where:** `TwitchAuth._refresh_due_at` (`twitch_bridge/auth.py`).
+- **Finding:** the refresh time follows `expires_in` from Twitch. A token issued with a lifetime of seconds would be refreshed (and chat logged in again) about that often; T6 bounds the reconnects, not the refreshes. Twitch issues tokens for about four hours.
+
+## 17. The image keeps the source tree
+
+- **Where:** `Dockerfile` (`COPY . /app`, `pip install .`).
+- **Finding:** `/app` (tests and docs included, local secrets excluded by `.dockerignore`) stays in the image, owned by root and read-only to the bridge. Not a secret, only weight; the Matrix fork installs from a copy and removes it.

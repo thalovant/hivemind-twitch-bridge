@@ -61,3 +61,60 @@ def test_the_bots_own_lines_and_other_channels_never_reach_the_hub():
     bridge.handle_chat_message(said("@hivebot hello", login="hivebot"))
     bridge.handle_chat_message(said("@hivebot hello", channel="elsewhere"))
     assert hub.utterances() == []
+
+
+def test_two_bots_answering_each_others_replies_stop_after_a_bounded_chain(monkeypatch):
+    """Another bridge answers the bot's reply with a Twitch reply that starts
+    with "@hivebot": each answer is addressed to the other, without end."""
+    import twitch_bridge as bridge_module
+
+    clock = [1000.0]
+    monkeypatch.setattr(bridge_module.time, "monotonic", lambda: clock[0])
+    bridge, hub = make()
+    for turn in range(bridge_module.LOOP_MAX_REPLIES + 5):
+        bridge.handle_chat_message(said(f"@hivebot answer {turn}", login="otherbot",
+                                        reply_parent="hivebot"))
+        clock[0] += 2.0
+    assert len(hub.utterances()) == bridge_module.LOOP_MAX_REPLIES
+    # someone else, and a fresh question from the same account, still get answers
+    bridge.handle_chat_message(said("@hivebot hi", login="carol", reply_parent="hivebot"))
+    bridge.handle_chat_message(said("@hivebot a new question", login="otherbot"))
+    assert len(hub.utterances()) == bridge_module.LOOP_MAX_REPLIES + 2
+    # and once the window has passed, replies are answered again
+    clock[0] += bridge_module.LOOP_WINDOW
+    bridge.handle_chat_message(said("@hivebot later", login="otherbot", reply_parent="hivebot"))
+    assert len(hub.utterances()) == bridge_module.LOOP_MAX_REPLIES + 3
+
+
+def test_the_reply_chain_memory_is_bounded(monkeypatch):
+    import twitch_bridge as bridge_module
+
+    monkeypatch.setattr(bridge_module, "LOOP_MEMORY", 10)
+    bridge, hub = make()
+    for number in range(50):
+        bridge.handle_chat_message(said("@hivebot hi", login=f"user{number}", reply_parent="hivebot"))
+    assert len(hub.utterances()) == 50
+    assert len(bridge._reply_chains) <= 10
+
+
+
+@pytest.mark.parametrize("failure", ["hub_down", "emit_raises"])
+def test_a_reply_that_never_reached_the_hub_does_not_count_toward_the_chain(failure, monkeypatch):
+    import twitch_bridge as bridge_module
+
+    bridge, hub = make()
+    if failure == "hub_down":
+        hub.handshake_event.clear()
+    else:
+        monkeypatch.setattr(hub, "emit", lambda message: (_ for _ in ()).throw(RuntimeError("down")))
+    for turn in range(bridge_module.LOOP_MAX_REPLIES + 2):
+        bridge.handle_chat_message(said(f"@hivebot try {turn}", login="carol", reply_parent="hivebot"))
+    assert hub.utterances() == []
+    # the hub is back: carol's replies are answered as if nothing was counted
+    if failure == "hub_down":
+        hub.handshake_event.set()
+    else:
+        monkeypatch.undo()
+    bridge.handle_chat_message(said("@hivebot now?", login="carol", reply_parent="hivebot"))
+    assert [m.data["utterances"][0] for m in hub.utterances()] == ["now?"]
+    assert len(bridge._reply_chains[("alpha", "carol")]) == 1

@@ -1,4 +1,4 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Thalovant fork: WebSocket chat client, token refresh, docs set.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Independent review: the reply path (every part addressed, command guard), the reply-chain bound, line handling.
 
 # hivemind-twitch-bridge
 
@@ -19,7 +19,7 @@ A HiveMind bridge for Twitch chat: a satellite whose input and output are a Twit
 | `twitch_bridge/__init__.py` | `HiveMindTwitchBridge`: lifecycle (`run`, `connect_hivemind`, `stop`), `addressed_text` (mention gating), `session_id`, `ready`, `handle_speak` and the reply path, exit statuses, `token_rejected` |
 | `twitch_bridge/chat.py` | `TwitchChat`: the WebSocket connection to `wss://irc-ws.chat.twitch.tv:443`, login, JOIN, PING/PONG, reconnect backoff, the outgoing queue; `SendLimiter` and `SlidingWindow` (Twitch's limits) |
 | `twitch_bridge/auth.py` | `TwitchAuth`: refresh (`/oauth2/token`), hourly validation (`/oauth2/validate`), static token mode |
-| `twitch_bridge/irc.py` | `parse_line`, `format_line`, tag escaping, `split_message` (500 characters) |
+| `twitch_bridge/irc.py` | `parse_line`, `format_line`, tag escaping, `split_message` (500 characters, `repeat_prefix`), `defuse_command` (`COMMAND_GUARD`) |
 | `twitch_bridge/errors.py` | `TokenRejected`, `ClientRejected` |
 | `twitch_bridge/health.py` | `HealthServer`: `/healthz` and `/readyz` |
 | `twitch_bridge/__main__.py` | `resolve_options`: flags, environment variables, `*_FILE` secrets; `main` |
@@ -30,8 +30,8 @@ A HiveMind bridge for Twitch chat: a satellite whose input and output are a Twit
 ## Message flow
 
 1. `TwitchChat` reads a WebSocket frame, splits it into IRC lines and parses each (`twitch_bridge.irc.parse_line`). A `PRIVMSG` in a configured channel from someone other than the bot becomes a `ChatMessage`.
-2. `HiveMindTwitchBridge.handle_chat_message` keeps it only if it mentions `@botlogin` or replies to the bot (`reply-parent-user-login` tag), removes the mention, and emits `recognizer_loop:utterance` with `twitch_channel`, `twitch_message_id`, `user` and `session` in the context.
+2. `HiveMindTwitchBridge.handle_chat_message` keeps it only if it mentions `@botlogin` or replies to the bot (`reply-parent-user-login` tag), drops a reply from an account whose replies it has already answered 8 times in 10 minutes (`_chain_allows`, bot loops), removes the mention, and emits `recognizer_loop:utterance` with `twitch_channel`, `twitch_message_id`, `user` and `session` in the context.
 3. The hub answers with `speak`, keeping that context. `handle_speak` runs on the HiveMind bus thread and hands the reply to the chat loop with `call_soon_threadsafe`.
-4. `TwitchChat.say` splits it into messages of at most 500 characters, the first starting with `@asker`, and queues them; the sender sends each with `@reply-parent-msg-id=<id>` as soon as `SendLimiter` allows.
+4. `TwitchChat.say` splits it into messages of at most 500 characters, each starting with `@asker` (with no asker, a part starting with `/` or `.` is guarded by `defuse_command`, so none runs as a Twitch command), and queues them; the sender sends each with `@reply-parent-msg-id=<id>` (dropped when the hub's id is not one) as soon as `SendLimiter` allows.
 
 Related: the HiveMind hub ([HiveMind-core](https://github.com/JarbasHiveMind/HiveMind-core)) and client library ([hivemind-bus-client](https://github.com/JarbasHiveMind/hivemind-bus-client), `HiveMessageBusClient`); the Telegram bridge built the same way ([thalovant/hivemind-telegram-bridge: docs/index.md](https://github.com/thalovant/hivemind-telegram-bridge/blob/main/docs/index.md)).

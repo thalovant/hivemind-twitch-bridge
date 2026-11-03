@@ -111,3 +111,26 @@ def test_valid_tag_keys_and_a_non_text_value():
         "@+example.com/x-y=1 ")
     with pytest.raises(ValueError):
         format_line("PRIVMSG", "#c", "hi", tags={"reply-parent-msg-id": 123})
+
+
+def test_a_repeated_prefix_starts_every_part_and_fits():
+    from twitch_bridge.irc import split_message
+    parts = split_message("word " * 300 + "x" * 1200, prefix="@alice ", repeat_prefix=True)
+    assert len(parts) > 3
+    assert all(part.startswith("@alice ") and chat_length(part) <= MAX_MESSAGE_LENGTH
+               for part in parts)
+
+
+@pytest.mark.parametrize("text,guarded", [
+    ("/ban alice", True), (".timeout x 1", True), ("  /me hi", True),
+    ("@alice /ban", False), ("hello /ban", False), ("", False), ("1.5 is a number", False),
+])
+def test_defuse_command_guards_only_a_leading_slash_or_dot(text, guarded):
+    from twitch_bridge.irc import COMMAND_GUARD, defuse_command
+    assert defuse_command(text) == (COMMAND_GUARD + text if guarded else text)
+
+
+def test_a_tag_value_cannot_carry_a_nul():
+    from twitch_bridge.irc import format_line
+    with pytest.raises(ValueError):
+        format_line("PRIVMSG", "#alpha", "hi", tags={"reply-parent-msg-id": "a\x00b"})

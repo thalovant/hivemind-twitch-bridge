@@ -1,4 +1,4 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Thalovant fork: WebSocket chat client, token refresh, settings from the environment.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Independent review: commands in replies, bot loops, redirects, reconnect backoff.
 
 # FAQ: hivemind-twitch-bridge
 
@@ -53,3 +53,20 @@ The reply is threaded under the question (`reply-parent-msg-id`), and starts wit
 ## Why is the default branch `main` and not `dev`?
 
 This is the Thalovant fork. Upstream's release workflows were removed, so nothing here publishes to PyPI or to upstream's registry; images go to `ghcr.io/thalovant/hivemind-twitch-bridge`.
+
+## Can a reply run a Twitch command such as `/ban` or `.timeout`?
+
+No. Twitch runs a message whose first character is `/` or `.` as a command. Every part of a reply starts with `@<asker> ` (`TwitchChat.say`, `split_message(..., repeat_prefix=True)`); a reply with no one to address gets an invisible U+200B before a leading `/` or `.` (`irc.defuse_command`).
+
+## Two bots in one channel keep answering each other. What stops them?
+
+A reply to the bot is answered at most 8 times per account and channel in 10 minutes (`HiveMindTwitchBridge._chain_allows`); then the bridge logs `not answering more replies from <login>` and waits for the window to pass. New questions (not replies) are not counted. A bot that answers with plain `@mentions` instead of Twitch replies is only slowed by the hub's own limits (AUDIT.md section 14).
+
+## Does the bridge follow redirects from Twitch's token service?
+
+No. `auth._http` hands a 3xx back and the call is retried later. urllib would otherwise copy the `Authorization` header, with the access token, to the host the redirect names.
+
+## Twitch keeps sending RECONNECT. Does the bridge hammer it?
+
+The first `RECONNECT` is followed at once. Another one after a session shorter than 60 s waits the normal backoff, growing each time (`TwitchChat.run`).
+

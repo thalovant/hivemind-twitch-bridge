@@ -1,4 +1,4 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Independent review: repo rules for command-safe replies, bounded reply chains, and text-free exception logs.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: A refused client id or secret writes token_rejected and exits 3, like a refused token (AUDIT section 12 fixed).
 
 # This is the Thalovant fork
 
@@ -136,8 +136,9 @@ before inventing a new pattern here.
   recognizer_loop:utterance <client_id>` (and usually `speak`). This bridge
   must not try to work around a denial locally.
 - **Refused credentials stop the process.** Twitch refusing the token
-  (`TokenRejected`) writes `token_rejected` to `/dev/termination-log` and
-  exits 3; a refused client id/secret (`ClientRejected`) exits 4; network
+  (`TokenRejected`) or the client id/secret (`ClientRejected`) writes
+  `token_rejected` to `/dev/termination-log` and exits 3, each with its own
+  log line; network
   trouble and Twitch 5xx/429 are retried and never stop it. Do not retry a
   `TokenRejected`, and do not turn a transient error into one.
 - **Threads.** Twitch chat runs on the asyncio loop `run()` starts. `speak`

@@ -1,6 +1,14 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Docs refresh: AUDIT section 12 and two suggestions against the platform's connector catalog and the generic operator.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: A refused client id or secret writes token_rejected and exits 3, like a refused token (AUDIT section 12 fixed).
 
 # Maintenance report: hivemind-twitch-bridge
+
+## 2026-11-03: a refused client id or secret is token_rejected
+
+- **What:** `HiveMindTwitchBridge._run` treats `ClientRejected` like `TokenRejected`: `token_rejected` in `/dev/termination-log`, exit status 3. The log line stays its own ("Twitch refused the client id or secret ..."). `EXIT_CLIENT_REJECTED` (4) is removed.
+- **Why:** where the platform runs the bridge, the owner types the client id and the client secret as they do the refresh token. A refusal is credentials to replace, and the operator and the API say so only for `token_rejected`. Live, a bad client id/secret showed as "Unavailable" (coordinator's smoke test, 2026-11-03). AUDIT.md section 12 and the matching suggestion are closed.
+- **Docs:** readme.md, QUICK_FACTS.md, FAQ.md, docs/setup.md and AGENTS.md now give exit status 3 for every refused credential.
+- **Verification:** `python -m pytest tests -q --ignore=tests/e2e` (Python 3.12): 170 passed. `tests/test_bridge.py::test_a_refused_client_id_or_secret_writes_token_rejected_and_exits_3` fails with the previous code (exit 4, no termination file).
+- **Transparency report:** AI model Claude Opus 5.5 (`claude-opus-5-5`) in Claude Code; changed the exit path, its test and the docs; asked for by the platform coordinator; review on the PR.
 
 
 

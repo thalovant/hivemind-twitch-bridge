@@ -1,4 +1,4 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: review: install step before running the bridge.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: A refused client id or secret writes token_rejected and exits 3, like a refused token (AUDIT section 12 fixed).
 
 # Setup: from nothing to a working Twitch bot
 
@@ -77,8 +77,7 @@ In one of the channels, write `@mybot what time is it`. The hub's logs show the 
 ## Troubleshooting
 
 - **`/readyz` stays 503 and the log repeats "Twitch has not confirmed #name"**: the channel login is wrong, renamed or suspended (Twitch silently drops a JOIN to a channel that does not exist).
-- **Exit status 3, `token_rejected` in `/dev/termination-log`**: Twitch refused the token: the refresh token was revoked (password change, application disconnected), the token belongs to another account than `TWITCH_BOT_LOGIN`, or it lacks `chat:read`/`chat:edit`. Get a new consent (step 3).
-- **Exit status 4**: Twitch refused the client id or secret.
+- **Exit status 3, `token_rejected` in `/dev/termination-log`**: Twitch refused a credential. The log says which. "Twitch refused the bot's credentials": the refresh token was revoked (password change, application disconnected), the token belongs to another account than `TWITCH_BOT_LOGIN`, or it lacks `chat:read`/`chat:edit`; get a new consent (step 3). "Twitch refused the client id or secret": check both against the application's page in the Twitch developer console.
 - **Exit status 1 right away**: the hub is unreachable or refused the access key and password; the bridge gives up after `DEFAULT_HANDSHAKE_MAX_RETRIES` (10) handshake attempts.
 - **The bot is connected but never answers**: the message must mention `@mybot` (or reply to the bot); whispers are never answered; check `allow-msg` on the hub.
 - **"HiveMind refused this identity" after the hub was reinstalled**: the bridge pins the hub's Noise key; reset the pin (`hivemind-client reset-noise-pin`) or start with a fresh `/home/bridge/.config/hivemind`.

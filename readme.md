@@ -1,4 +1,4 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: CodeRabbit on PR #2: the no-asker case of the command guard.
+Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: A refused client id or secret writes token_rejected and exits 3, like a refused token (AUDIT section 12 fixed).
 
 # HiveMind Twitch Bridge
 
@@ -23,7 +23,7 @@ New here? [docs/setup.md](docs/setup.md) walks through it from scratch: the Twit
 - Stays under Twitch's chat limits for an account that is not a moderator: at most 18 messages in any 30 seconds for the whole account (Twitch's limit is 20, counted per user, so it also holds per channel), at least 1.1 s between messages in one channel, longer in slow mode. Outgoing messages wait in a queue; an answer that waited more than 2 minutes is dropped.
 - Answers Twitch's PING, sends its own after a minute of silence, and reconnects with exponential backoff (at once when Twitch asks with RECONNECT), joining every channel again.
 - Refreshes the bot's user access token before it expires, and validates it hourly, as Twitch asks.
-- Stops on a credential Twitch refuses, writing `token_rejected` to `/dev/termination-log` (exit status 3).
+- Stops on a credential Twitch refuses (the bot's token, or the client id or secret), writing `token_rejected` to `/dev/termination-log` (exit status 3).
 - Never logs what anyone wrote, what the bridge answered, or a token.
 
 ## Getting a token
@@ -80,7 +80,7 @@ Every setting comes from the environment; each also has a flag (`hivemind-twitch
 
 `/healthz` answers 200 while the process runs. `/readyz` answers 200 only while the HiveMind session is live **and** the bot is logged in to Twitch and has joined every listed channel (503 otherwise). A channel Twitch never confirms (misspelt, renamed or suspended) keeps the bridge not ready; the log names it every minute.
 
-Exit statuses: `0` stopped (SIGTERM or SIGINT), `1` the hub is unreachable or refused the bridge, `2` a setting is missing or malformed, `3` Twitch refused the bot's token (`token_rejected` written to `/dev/termination-log`), `4` Twitch refused the client id or secret.
+Exit statuses: `0` stopped (SIGTERM or SIGINT), `1` the hub is unreachable or refused the bridge, `2` a setting is missing or malformed, `3` Twitch refused a credential: the bot's token, or the client id or secret (`token_rejected` written to `/dev/termination-log`; the log line says which).
 
 ## Docker
 

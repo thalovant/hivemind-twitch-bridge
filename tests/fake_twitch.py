@@ -7,6 +7,7 @@ WHISPER, and it records every line the client sent with the time it arrived.
 Several lines go out in one frame, as Twitch sends them.
 """
 import asyncio
+import json
 import time
 from typing import Dict, List, Optional, Tuple
 
@@ -130,3 +131,100 @@ class FakeTwitch:
                         self.privmsgs.append((time.monotonic(), line))
         except Exception:
             return
+
+
+class FakeTwitchId:
+    """A local stand-in for ``https://id.twitch.tv/oauth2`` (``/token`` and ``/validate``).
+
+    Refreshing a known refresh token issues ``access-<n>`` and rotates the
+    refresh token to ``refresh-<n>``. ``token_answers`` / ``validate_answers``
+    queue canned (status, body) answers that are used before the normal logic.
+    """
+
+    def __init__(self, refresh_token: str = "refresh-0", client_id: str = "cid",
+                 client_secret: str = "secret", login: str = "hivebot",
+                 scopes=("chat:read", "chat:edit"), expires_in: int = 14400):
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from urllib.parse import parse_qs
+
+        self.valid_refresh = {refresh_token}
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.login = login
+        self.scopes = list(scopes)
+        self.expires_in = expires_in
+        #: access token -> login it belongs to
+        self.access = {}
+        self.token_answers = []
+        self.validate_answers = []
+        #: (method, path, form or None, Authorization header or None)
+        self.requests = []
+        self._count = 0
+        fake = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                return
+
+            def _answer(self, status, body):
+                raw = json.dumps(body).encode()
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def do_POST(self):
+                length = int(self.headers.get("Content-Length") or 0)
+                form = {key: values[0] for key, values in
+                        parse_qs(self.rfile.read(length).decode()).items()}
+                fake.requests.append(("POST", self.path, form, None))
+                if fake.token_answers:
+                    return self._answer(*fake.token_answers.pop(0))
+                if form.get("client_id") != fake.client_id:
+                    return self._answer(400, {"status": 400, "message": "invalid client"})
+                if form.get("client_secret") != fake.client_secret:
+                    return self._answer(403, {"status": 403, "message": "invalid client secret"})
+                if (form.get("grant_type") != "refresh_token"
+                        or form.get("refresh_token") not in fake.valid_refresh):
+                    return self._answer(400, {"error": "Bad Request", "status": 400,
+                                              "message": "Invalid refresh token"})
+                fake._count += 1
+                access, rotated = f"access-{fake._count}", f"refresh-{fake._count}"
+                fake.valid_refresh = {rotated}
+                fake.access[access] = fake.login
+                return self._answer(200, {"access_token": access, "refresh_token": rotated,
+                                          "expires_in": fake.expires_in,
+                                          "scope": fake.scopes, "token_type": "bearer"})
+
+            def do_GET(self):
+                header = self.headers.get("Authorization")
+                fake.requests.append(("GET", self.path, None, header))
+                if fake.validate_answers:
+                    return self._answer(*fake.validate_answers.pop(0))
+                token = (header or "").partition(" ")[2]
+                if token not in fake.access:
+                    return self._answer(401, {"status": 401, "message": "invalid access token"})
+                return self._answer(200, {"client_id": fake.client_id,
+                                          "login": fake.access[token], "scopes": fake.scopes,
+                                          "user_id": "999", "expires_in": fake.expires_in})
+
+        self._server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self._server.daemon_threads = True
+        self.url = f"http://127.0.0.1:{self._server.server_address[1]}/oauth2"
+        self._thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+
+    def __enter__(self):
+        self._thread.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._server.shutdown()
+        self._server.server_close()
+
+    def posts(self):
+        return [form for method, _, form, _ in self.requests if method == "POST"]
+
+    def validations(self):
+        return [header for method, _, _, header in self.requests if method == "GET"]

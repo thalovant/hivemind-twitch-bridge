@@ -1,5 +1,3 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: A refused client id or secret writes token_rejected and exits 3, like a refused token (AUDIT section 12 fixed).
-
 # HiveMind Twitch Bridge
 
 This bridges a Twitch bot account's chat to a [HiveMind](https://github.com/JarbasHiveMind/HiveMind-core) hub. A HiveMind bridge is a satellite whose input and output are a chat platform instead of a microphone: a chat message that mentions the bot becomes a HiveMind utterance, and the hub's spoken reply is posted back into the same channel as a Twitch reply to that message.

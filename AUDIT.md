@@ -1,6 +1,8 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: A refused client id or secret writes token_rejected and exits 3, like a refused token (AUDIT section 12 fixed).
-
 # Audit: hivemind-twitch-bridge
+
+## 2026-11-15 - Per-file author/date/motive headers
+
+Finding: 10 files carried an author/date/motive header line that the owner has withdrawn. State: fixed in this change (a case-insensitive `git grep` for the header keyword is empty). No code path was touched, so no test result changes; the repository's CI on the pull request is the test of record.
 
 Evidence: `python -m pytest tests -q --ignore=tests/e2e` (133 passed, Python 3.12 and 3.14), `python -m pytest tests/e2e/test_twitch_hivemind_e2e.py` (2 passed through a real hivemind-core 5.3.10a1 hub), `TWITCH_LIVE=1 python -m pytest tests/e2e/test_twitch_live.py` (2 passed against real Twitch chat, 1 skipped: it needs a bot token), a mutation pass (21 source mutations, each failed a test) and a revert check for each review fix (8, each failed its test), the image run in MAINTENANCE_REPORT.md, and reading the code at commit `b50c55945e3e` (line numbers below refer to it). Upstream findings were reproduced against upstream's `twitch_bridge/twitch.py` at `dde4b89` with a local IRC server.
 

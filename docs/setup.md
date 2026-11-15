@@ -1,5 +1,3 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: A refused client id or secret writes token_rejected and exits 3, like a refused token (AUDIT section 12 fixed).
-
 # Setup: from nothing to a working Twitch bot
 
 This takes a Twitch account for the bot, a HiveMind hub and a machine (or container) that can reach both over TCP 443 (Twitch) and the hub's port.

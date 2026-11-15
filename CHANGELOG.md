@@ -1,5 +1,3 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: marked as upstream's release history; the fork records its changes in MAINTENANCE_REPORT.md.
-
 > Upstream's generated release history, up to 0.0.6a1. This fork does not publish releases to PyPI; its changes are recorded in [MAINTENANCE_REPORT.md](MAINTENANCE_REPORT.md).
 
 # Changelog

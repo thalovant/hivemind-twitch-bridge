@@ -1,5 +1,3 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: Independent review: the reply path (every part addressed, command guard), the reply-chain bound, line handling.
-
 # hivemind-twitch-bridge
 
 A HiveMind bridge for Twitch chat: a satellite whose input and output are a Twitch bot account instead of a microphone. A message in an allowed channel that mentions the bot (or replies to it) becomes `recognizer_loop:utterance` on the hub; `speak` goes back to the channel as a Twitch reply to that message.

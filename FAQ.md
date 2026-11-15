@@ -1,5 +1,3 @@
-Last Edit: Claude Opus 5.5 - 2026-11-03 - Motive: A refused client id or secret writes token_rejected and exits 3, like a refused token (AUDIT section 12 fixed).
-
 # FAQ: hivemind-twitch-bridge
 
 ## Why does the bot ignore most chat messages?
